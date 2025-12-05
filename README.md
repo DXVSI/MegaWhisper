@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/DXVSI/MegaWhisper/main/logo.png" alt="MegaWhisper Logo" width="128">
-</p>
-
-<h1 align="center">MegaWhisper</h1>
+<h1 align="center">🎙️ MegaWhisper</h1>
 
 <p align="center">
   <b>Powerful speech-to-text tool for Linux</b>
