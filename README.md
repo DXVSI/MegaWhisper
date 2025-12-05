@@ -1,4 +1,19 @@
-# MegaWhisper
+<p align="center">
+  <img src="https://raw.githubusercontent.com/DXVSI/MegaWhisper/main/logo.png" alt="MegaWhisper Logo" width="128">
+</p>
+
+<h1 align="center">MegaWhisper</h1>
+
+<p align="center">
+  <b>Powerful speech-to-text tool for Linux</b>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Qt-6.x-green.svg" alt="Qt">
+  <img src="https://img.shields.io/badge/Platform-Fedora%20Linux-blue.svg" alt="Platform">
+</p>
+
+---
 
 Voice-to-text application for Linux with local Whisper and OpenAI API support.
 
@@ -58,7 +73,3 @@ sudo dnf install qt6-qtbase portaudio flac
 | large-v3 | ~3 GB | Latest |
 
 For Russian language, **medium** or **large-v3** recommended.
-
-## License
-
-Proprietary software. All rights reserved.
