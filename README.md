@@ -9,6 +9,10 @@
   <img src="https://img.shields.io/badge/Platform-Fedora%20Linux-blue.svg" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="img/tray-menu.png" width="350" alt="System Tray Menu">
+</p>
+
 ---
 
 Voice-to-text application for Linux with local Whisper and OpenAI API support.
@@ -69,3 +73,30 @@ sudo dnf install qt6-qtbase portaudio flac
 | large-v3 | ~3 GB | Latest |
 
 For Russian language, **medium** or **large-v3** recommended.
+
+## Screenshots
+
+### Recording History
+<p align="center">
+  <img src="img/history.png" width="700" alt="Recording History">
+</p>
+
+<p align="center">
+  <img src="img/history-details.png" width="700" alt="Recording Details">
+</p>
+
+### Settings
+<p align="center">
+  <img src="img/settings-api.png" width="400" alt="OpenAI API Settings">
+  <img src="img/settings-local.png" width="400" alt="Local Whisper Settings">
+</p>
+
+<p align="center">
+  <img src="img/settings-models.png" width="400" alt="Model Selection">
+  <img src="img/settings-hotkey.png" width="400" alt="Hotkey Settings">
+</p>
+
+<p align="center">
+  <img src="img/settings-output.png" width="400" alt="Output Settings">
+  <img src="img/settings-translate.png" width="400" alt="Translation Settings">
+</p>
