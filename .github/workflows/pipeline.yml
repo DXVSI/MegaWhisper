@@ -1,0 +1,885 @@
+name: MegaWhisper public distribution
+
+run-name: >-
+  MegaWhisper ${{ github.event.client_payload.tag }}
+  ${{ github.event.client_payload.operation }}
+  dispatch ${{ github.event.client_payload.dispatch_id }}
+
+on:
+  repository_dispatch:
+    types:
+      - megawhisper-release
+      - megawhisper-flatpak-recovery
+
+permissions:
+  contents: read
+
+concurrency:
+  group: megawhisper-public-distribution
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      ${{ github.event.action == 'megawhisper-release'
+          && github.event.client_payload.operation == 'release' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      FLATPAK_REPO_URL: https://dxvsi.github.io/MegaWhisper
+    steps:
+      - name: Validate immutable dispatch identity
+        shell: bash
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          set -Eeuo pipefail
+          operation="$(jq -r '.operation // empty' <<< "$PAYLOAD")"
+          source_run_id="$(jq -r '.source_run_id // empty' <<< "$PAYLOAD")"
+          dispatch_run_id="$(jq -r '.dispatch_run_id // empty' <<< "$PAYLOAD")"
+          dispatch_run_attempt="$(jq -r \
+            '.dispatch_run_attempt // empty' <<< "$PAYLOAD")"
+          dispatch_id="$(jq -r '.dispatch_id // empty' <<< "$PAYLOAD")"
+          source_sha="$(jq -r '.source_sha // empty' <<< "$PAYLOAD")"
+          public_source_sha="$(jq -r '.public_source_sha // empty' <<< "$PAYLOAD")"
+          distribution_sha="$(jq -r '.distribution_sha // empty' <<< "$PAYLOAD")"
+          tag="$(jq -r '.tag // empty' <<< "$PAYLOAD")"
+          version="$(jq -r '.version // empty' <<< "$PAYLOAD")"
+          flatpak_commit="$(jq -r '.flatpak_commit // empty' <<< "$PAYLOAD")"
+          rollback_commit="$(jq -r '.rollback_commit // empty' <<< "$PAYLOAD")"
+          if [[ "$operation" != release \
+                || ! "$source_run_id" =~ ^[1-9][0-9]*$ \
+                || ! "$dispatch_run_id" =~ ^[1-9][0-9]*$ \
+                || ! "$dispatch_run_attempt" =~ ^[1-9][0-9]*$ \
+                || "$dispatch_id" \
+                    != "$dispatch_run_id-$dispatch_run_attempt-release" \
+                || ! "$source_sha" =~ ^[0-9a-f]{40}$ \
+                || ! "$public_source_sha" =~ ^[0-9a-f]{40}$ \
+                || ! "$distribution_sha" =~ ^[0-9a-f]{40}$ \
+                || ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
+                || "v$version" != "$tag" \
+                || ! "$flatpak_commit" =~ ^[0-9a-f]{64}$ \
+                || ! "$rollback_commit" =~ ^(none|[0-9a-f]{64})$ ]]; then
+            echo "Invalid public release dispatch payload" >&2
+            exit 64
+          fi
+          if [[ "$GITHUB_REPOSITORY" != DXVSI/MegaWhisper ]]; then
+            echo "Public distribution workflow is running in an unexpected repository" >&2
+            exit 65
+          fi
+
+      - name: Checkout protected public distribution verifiers
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.client_payload.distribution_sha }}
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install distribution verification tooling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl flatpak gnupg jq libxml2-utils ostree zstd
+          sudo flatpak remote-add --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          platform_commit=8d76cf000aa3ea5994b96e9de32bfdb07049213df3c4a1a72af311ebec5e2647
+          sudo flatpak install -y --noninteractive \
+            flathub org.kde.Platform//6.11
+          sudo flatpak update -y --noninteractive \
+            --commit="$platform_commit" runtime/org.kde.Platform/x86_64/6.11
+          [[ "$(flatpak info --system --show-commit \
+            org.kde.Platform 6.11)" == "$platform_commit" ]]
+
+      - id: state
+        name: Verify public source, draft assets and signed repository states
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
+          PUBLIC_SOURCE_SHA: ${{ github.event.client_payload.public_source_sha }}
+          DISTRIBUTION_SHA: ${{ github.event.client_payload.distribution_sha }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_VERSION: ${{ github.event.client_payload.version }}
+          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+          EXPECTED_ROLLBACK_COMMIT: ${{ github.event.client_payload.rollback_commit }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck disable=SC2153
+          checked_out_distribution_sha="$(git rev-parse 'HEAD^{commit}')"
+          if [[ "$checked_out_distribution_sha" != "$DISTRIBUTION_SHA" ]]; then
+            echo "Checked-out public distribution source differs from dispatch" >&2
+            exit 65
+          fi
+          git fetch --force --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor \
+              "$DISTRIBUTION_SHA" refs/remotes/origin/main; then
+            echo "Dispatched public distribution source is not in main" >&2
+            exit 65
+          fi
+          git fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/ci/public-source"
+          public_tag_sha="$(git rev-parse 'refs/ci/public-source^{commit}')"
+          remote_tag_state="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            --jq '[.object.type, .object.sha] | @tsv')"
+          IFS=$'\t' read -r remote_tag_type remote_tag_sha \
+            <<< "$remote_tag_state"
+          source_graph="$(git show refs/ci/public-source:SOURCE-GRAPH.txt)"
+          metadata_source_sha="$(awk -F= \
+            '$1 == "source_sha" { count++; value=$2 }
+             END { if (count == 1) print value }' <<< "$source_graph")"
+          metadata_version="$(awk -F= \
+            '$1 == "version" { count++; value=$2 }
+             END { if (count == 1) print value }' <<< "$source_graph")"
+          if [[ "$public_tag_sha" != "$PUBLIC_SOURCE_SHA" \
+                || "$remote_tag_type" != commit \
+                || "$remote_tag_sha" != "$PUBLIC_SOURCE_SHA" \
+                || "$metadata_source_sha" != "$SOURCE_SHA" \
+                || "$metadata_version" != "$RELEASE_VERSION" ]]; then
+            echo "Public source tag does not match the dispatched private source identity" >&2
+            exit 65
+          fi
+          if [[ "$(wc -w < <(git rev-list --parents -n 1 \
+              refs/ci/public-source))" -ne 1 ]]; then
+            echo "Public source snapshot must remain an orphan commit" >&2
+            exit 65
+          fi
+
+          release_state="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,tagName \
+            --jq '[.isDraft, .isPrerelease, .tagName] | @tsv')"
+          IFS=$'\t' read -r is_draft is_prerelease release_tag <<< "$release_state"
+          if [[ "$is_prerelease" != false || "$release_tag" != "$RELEASE_TAG" \
+                || ( "$is_draft" != true && "$is_draft" != false ) ]]; then
+            echo "Public release has an invalid identity or state" >&2
+            exit 65
+          fi
+
+          mkdir -p release-assets
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets
+          scripts/ci/verify-release-signatures.sh release-assets
+          expected_assets="$(scripts/ci/list-release-assets.sh \
+            "$RELEASE_VERSION" release)"
+          actual_assets="$(find release-assets -maxdepth 1 -type f \
+            -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo "Public release asset inventory is not exact" >&2
+            diff -u <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$actual_assets") || true
+            exit 65
+          fi
+
+          fingerprint="$(tr -d '[:space:]' < RELEASE_KEY_FINGERPRINT \
+            | tr '[:lower:]' '[:upper:]')"
+          key_fingerprint="$(gpg --batch --with-colons --show-keys \
+            release-assets/megawhisper-release-key.asc \
+            | awk -F: '$1 == "pub" { primary=1; next }
+                $1 == "fpr" && primary { print toupper($10); exit }')"
+          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ \
+                || "$key_fingerprint" != "$fingerprint" ]]; then
+            echo "Public release key does not match the pinned fingerprint" >&2
+            exit 65
+          fi
+
+          recovery_metadata=release-assets/flatpak-pages-recovery.txt
+          metadata_format="$(awk -F= '$1 == "format" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_run_id="$(awk -F= '$1 == "source_run_id" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_source="$(awk -F= '$1 == "source_sha" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_public_source="$(awk -F= \
+            '$1 == "public_source_sha" { print $2 }' "$recovery_metadata")"
+          metadata_repository="$(awk -F= \
+            '$1 == "release_repository" { print $2 }' "$recovery_metadata")"
+          metadata_version="$(awk -F= '$1 == "version" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_commit="$(awk -F= '$1 == "flatpak_commit" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_site_source="$(awk -F= \
+            '$1 == "site_source_sha" { print $2 }' "$recovery_metadata")"
+          site_archive_sha="$(awk -F= \
+            '$1 == "site_archive_sha256" { print $2 }' \
+            "$recovery_metadata")"
+          metadata_rollback="$(awk -F= '$1 == "rollback_commit" { print $2 }' \
+            "$recovery_metadata")"
+          rollback_archive_sha="$(awk -F= \
+            '$1 == "rollback_archive_sha256" { print $2 }' "$recovery_metadata")"
+          rollback_site_source="$(awk -F= \
+            '$1 == "rollback_site_source_sha" { print $2 }' \
+            "$recovery_metadata")"
+          rollback_site_archive_sha="$(awk -F= \
+            '$1 == "rollback_site_archive_sha256" { print $2 }' \
+            "$recovery_metadata")"
+          if [[ "$metadata_format" != 3 \
+                || "$metadata_run_id" != "$SOURCE_RUN_ID" \
+                || "$metadata_source" != "$SOURCE_SHA" \
+                || "$metadata_public_source" != "$PUBLIC_SOURCE_SHA" \
+                || "$metadata_repository" != "$GITHUB_REPOSITORY" \
+                || "$metadata_version" != "$RELEASE_VERSION" \
+                || "$metadata_commit" != "$EXPECTED_FLATPAK_COMMIT" \
+                || "$metadata_site_source" != "$DISTRIBUTION_SHA" \
+                || ! "$site_archive_sha" =~ ^[0-9a-f]{64}$ \
+                || "$metadata_rollback" != "$EXPECTED_ROLLBACK_COMMIT" \
+                || ! "$rollback_archive_sha" =~ ^[0-9a-f]{64}$ \
+                || ! "$rollback_site_source" =~ ^[0-9a-f]{40}$ \
+                || ! "$rollback_site_archive_sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Signed Flatpak deployment metadata does not match the dispatch" >&2
+            exit 65
+          fi
+
+          scripts/ci/verify-pages-recovery.sh \
+            release-assets candidate-repo candidate-site \
+            "$fingerprint" "$SOURCE_RUN_ID" strict
+          install -m 0644 "$recovery_metadata" \
+            candidate-repo/flatpak-active-state.txt
+          install -m 0644 "$recovery_metadata.asc" \
+            candidate-repo/flatpak-active-state.txt.asc
+          install -m 0644 release-assets/megawhisper-release-key.asc \
+            candidate-repo/megawhisper-release-key.asc
+
+          rollback_archive=release-assets/MegaWhisper-flatpak-rollback-repo.tar.zst
+          actual_rollback_archive_sha="$(sha256sum "$rollback_archive" \
+            | awk '{print $1}')"
+          if [[ "$actual_rollback_archive_sha" != "$rollback_archive_sha" ]]; then
+            echo "Rollback archive differs from signed deployment metadata" >&2
+            exit 65
+          fi
+          mkdir -p rollback-repo
+          while IFS= read -r entry; do
+            case "$entry" in
+              /*|..|../*|*/../*)
+                echo "Unsafe path in rollback repository archive: $entry" >&2
+                exit 65
+                ;;
+            esac
+          done < <(tar --zstd -tf "$rollback_archive")
+          tar --zstd -xf "$rollback_archive" \
+            -C rollback-repo --no-same-owner --no-same-permissions
+          ostree fsck --repo=rollback-repo
+          rollback_ref="$(ostree rev-parse --repo=rollback-repo \
+            app/io.github.dxvsi.megawhisper/x86_64/stable 2>/dev/null || true)"
+          if [[ "$EXPECTED_ROLLBACK_COMMIT" == none ]]; then
+            if [[ -n "$rollback_ref" ]]; then
+              echo "First-release rollback unexpectedly exposes an app commit" >&2
+              exit 65
+            fi
+          elif [[ "$rollback_ref" != "$EXPECTED_ROLLBACK_COMMIT" ]]; then
+            echo "Rollback repository does not expose the expected commit" >&2
+            exit 65
+          fi
+
+          rollback_site_archive=release-assets/MegaWhisper-pages-rollback-site.tar.zst
+          actual_rollback_site_archive_sha="$(sha256sum \
+            "$rollback_site_archive" | awk '{print $1}')"
+          if [[ "$actual_rollback_site_archive_sha" \
+                != "$rollback_site_archive_sha" ]]; then
+            echo "Rollback site archive differs from signed metadata" >&2
+            exit 65
+          fi
+          mkdir -p rollback-site
+          while IFS= read -r entry; do
+            case "$entry" in
+              /*|..|../*|*/../*)
+                echo "Unsafe path in rollback site archive: $entry" >&2
+                exit 65
+                ;;
+            esac
+          done < <(tar --zstd -tf "$rollback_site_archive")
+          tar --zstd -xf "$rollback_site_archive" \
+            -C rollback-site --no-same-owner --no-same-permissions
+          scripts/ci/verify-pages-site.sh rollback-site rollback manifest
+
+          scripts/ci/assemble-pages-state.sh \
+            candidate-site candidate-repo candidate-pages \
+            "$EXPECTED_FLATPAK_COMMIT" release
+          scripts/ci/assemble-pages-state.sh \
+            rollback-site rollback-repo rollback-pages \
+            "$EXPECTED_ROLLBACK_COMMIT" rollback
+          if [[ "$is_draft" == true ]]; then
+            echo "mode=deploy" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=reconciled" >> "$GITHUB_OUTPUT"
+          fi
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "site_source_sha=$metadata_site_source" >> "$GITHUB_OUTPUT"
+
+      - name: Install and smoke-test the signed candidate locally
+        shell: bash
+        env:
+          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+        run: |
+          set -Eeuo pipefail
+          state_root="$(mktemp -d)"
+          trap 'rm -rf "$state_root"' EXIT
+          export HOME="$state_root/home"
+          export XDG_DATA_HOME="$state_root/data"
+          export XDG_CONFIG_HOME="$state_root/config"
+          export XDG_CACHE_HOME="$state_root/cache"
+          export XDG_RUNTIME_DIR="$state_root/runtime"
+          install -d -m 0700 "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" \
+            "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
+          flatpak remote-add --user \
+            --gpg-import=release-assets/megawhisper-release-key.asc \
+            candidate "file://$GITHUB_WORKSPACE/candidate-repo"
+          flatpak install --user -y --noninteractive \
+            candidate io.github.dxvsi.megawhisper
+          installed_commit="$(flatpak info --user --show-commit \
+            io.github.dxvsi.megawhisper)"
+          if [[ "$installed_commit" != "$EXPECTED_FLATPAK_COMMIT" ]]; then
+            echo "Installed candidate commit is invalid" >&2
+            exit 65
+          fi
+          permissions="$(flatpak info --user --show-permissions \
+            io.github.dxvsi.megawhisper)"
+          printf '%s\n' "$permissions" | scripts/ci/check-flatpak-permissions.sh
+          for smoke_argument in --identity-smoke-test --smoke-test \
+            --ui-smoke-test --media-smoke-test; do
+            timeout 60s flatpak run --user \
+              --env=G_DEBUG=fatal-criticals \
+              --env=QT_QPA_PLATFORM=offscreen \
+              io.github.dxvsi.megawhisper "$smoke_argument"
+          done
+
+      - name: Configure public GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload verified site and stable repository
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: pages-stable-${{ github.run_attempt }}
+          path: candidate-pages
+          include-hidden-files: true
+
+      - name: Upload exact previous Pages state
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: pages-rollback-${{ github.run_attempt }}
+          path: rollback-pages
+          include-hidden-files: true
+
+      - id: deployment
+        name: Deploy verified site and stable repository
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: pages-stable-${{ github.run_attempt }}
+
+      - name: Verify promoted or previously published full Pages state
+        if: >-
+          ${{ steps.state.outputs.mode == 'deploy'
+              || steps.state.outputs.mode == 'reconciled' }}
+        shell: bash
+        env:
+          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+          FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
+        run: |
+          set -Eeuo pipefail
+          pages_verified=0
+          deadline=$((SECONDS + 180))
+          for attempt in $(seq 1 12); do
+            echo "Checking stable Pages state, attempt $attempt of 12"
+            if scripts/ci/verify-live-pages-state.sh \
+                "$FLATPAK_REPO_URL" candidate-pages candidate-site \
+                "$FINGERPRINT" \
+                "$EXPECTED_FLATPAK_COMMIT" \
+                "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-stable-$attempt" \
+                release; then
+              pages_verified=1
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              break
+            fi
+          done
+          if [[ "$pages_verified" -ne 1 ]]; then
+            echo "Stable Pages state differs from the signed candidate" >&2
+            exit 65
+          fi
+
+      - name: Install and verify the recommended signed Flatpak ref
+        if: >-
+          ${{ steps.state.outputs.mode == 'deploy'
+              || steps.state.outputs.mode == 'reconciled' }}
+        shell: bash
+        env:
+          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+        run: |
+          set -Eeuo pipefail
+          state_root="$(mktemp -d)"
+          trap 'rm -rf "$state_root"' EXIT
+          export HOME="$state_root/home"
+          export XDG_DATA_HOME="$state_root/data"
+          export XDG_CONFIG_HOME="$state_root/config"
+          export XDG_CACHE_HOME="$state_root/cache"
+          export XDG_RUNTIME_DIR="$state_root/runtime"
+          install -d -m 0700 "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" \
+            "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
+          release_flatpak_ref=release-assets/io.github.dxvsi.megawhisper.flatpakref
+          live_flatpak_ref="$state_root/io.github.dxvsi.megawhisper.flatpakref"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --retry-delay 1 \
+            --connect-timeout 10 --max-time 60 \
+            --output "$live_flatpak_ref" \
+            "$FLATPAK_REPO_URL/io.github.dxvsi.megawhisper.flatpakref?megawhisper_install=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if ! cmp --silent "$release_flatpak_ref" "$live_flatpak_ref"; then
+            echo "Published Flatpak ref differs from the signed Release asset" >&2
+            exit 65
+          fi
+          grep -Fxq "Url=$FLATPAK_REPO_URL" "$live_flatpak_ref"
+          flatpak install --user -y --noninteractive "$live_flatpak_ref"
+          installed_commit="$(flatpak info --user --show-commit \
+            io.github.dxvsi.megawhisper)"
+          if [[ "$installed_commit" != "$EXPECTED_FLATPAK_COMMIT" ]]; then
+            echo "Flatpak ref installed an unexpected commit" >&2
+            exit 65
+          fi
+          permissions="$(flatpak info --user --show-permissions \
+            io.github.dxvsi.megawhisper)"
+          printf '%s\n' "$permissions" \
+            | scripts/ci/check-flatpak-permissions.sh
+          identity_output="$(timeout 60s flatpak run --user \
+            --env=QT_QPA_PLATFORM=offscreen \
+            io.github.dxvsi.megawhisper --identity-smoke-test)"
+          expected_identity='identity-smoke: app_id=io.github.dxvsi.megawhisper; package_kind=flatpak; desktop_id=io.github.dxvsi.megawhisper'
+          if [[ "$identity_output" != "$expected_identity" ]]; then
+            echo "Flatpak ref installed an unexpected application identity" >&2
+            exit 65
+          fi
+          for smoke_argument in --tls-trust-smoke-test \
+            --tls-network-smoke-test --smoke-test --ui-smoke-test \
+            --media-smoke-test; do
+            timeout 60s flatpak run --user \
+              --env=G_DEBUG=fatal-criticals \
+              --env=QT_QPA_PLATFORM=offscreen \
+              io.github.dxvsi.megawhisper "$smoke_argument"
+          done
+          if ! flatpak remotes --user --columns=url \
+              | sed 's#/$##' \
+              | grep -Fxq "${FLATPAK_REPO_URL%/}"; then
+            echo "Flatpak ref did not configure the signed stable update channel" >&2
+            exit 65
+          fi
+
+      - id: publish
+        name: Publish draft release after stable verification
+        if: steps.state.outputs.mode == 'deploy'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+        run: |
+          set -Eeuo pipefail
+          echo "state=pre-mutation" >> "$GITHUB_OUTPUT"
+          release_state="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,isDraft \
+            --jq '[.databaseId, .isDraft] | @tsv')"
+          IFS=$'\t' read -r release_id current_draft <<< "$release_state"
+          if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Public release ID is invalid" >&2
+            exit 65
+          fi
+          if [[ "$current_draft" == false ]]; then
+            echo "state=published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$current_draft" != true ]]; then
+            echo "Public release draft state is invalid" >&2
+            exit 65
+          fi
+          published_tags="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false)
+              | .tag_name')"
+          highest_tag="$(printf '%s\n%s\n' "$RELEASE_TAG" "$published_tags" \
+            | sed '/^$/d' | LC_ALL=C sort -V | tail -n 1)"
+          if [[ "$highest_tag" == "$RELEASE_TAG" ]]; then
+            make_latest=true
+          else
+            make_latest=false
+          fi
+          echo "state=unknown" >> "$GITHUB_OUTPUT"
+          if gh api --method PATCH \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -F draft=false \
+              -f make_latest="$make_latest" >/dev/null; then
+            observed_draft="$(gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+            if [[ "$observed_draft" == false ]]; then
+              echo "state=published" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "Release publication state is ambiguous; automatic rollback is suppressed" >&2
+          exit 75
+
+      - id: rollback-deployment
+        name: Restore the exact previous Pages state after failed deployment
+        if: >-
+          ${{ failure()
+              && steps.state.outputs.mode == 'deploy'
+              && (steps.deployment.outcome == 'success'
+                  || steps.deployment.outcome == 'failure')
+              && steps.publish.outputs.state != 'published'
+              && steps.publish.outputs.state != 'unknown' }}
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: pages-rollback-${{ github.run_attempt }}
+
+      - name: Verify automatic rollback
+        if: ${{ failure() && steps.rollback-deployment.outcome == 'success' }}
+        shell: bash
+        env:
+          EXPECTED_ROLLBACK_COMMIT: ${{ github.event.client_payload.rollback_commit }}
+          FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
+        run: |
+          set -Eeuo pipefail
+          scripts/ci/verify-live-pages-state.sh \
+            "$FLATPAK_REPO_URL" rollback-pages rollback-site "$FINGERPRINT" \
+            "$EXPECTED_ROLLBACK_COMMIT" \
+            "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-rollback" rollback
+
+  recover:
+    if: >-
+      ${{ github.event.action == 'megawhisper-flatpak-recovery'
+          && (github.event.client_payload.operation == 'restore'
+              || github.event.client_payload.operation == 'rollback') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.recovery-deployment.outputs.page_url }}
+    env:
+      FLATPAK_REPO_URL: https://dxvsi.github.io/MegaWhisper
+    steps:
+      - name: Checkout protected public recovery verifiers
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install recovery verification tooling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl flatpak gnupg jq libxml2-utils ostree zstd
+
+      - id: recovery-state
+        name: Verify and stage requested signed state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ github.event.client_payload.operation }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          DISPATCH_RUN_ID: ${{ github.event.client_payload.dispatch_run_id }}
+          DISPATCH_RUN_ATTEMPT: ${{ github.event.client_payload.dispatch_run_attempt }}
+          DISPATCH_ID: ${{ github.event.client_payload.dispatch_id }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
+          EXPECTED_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck disable=SC2153
+          if [[ "$OPERATION" != restore && "$OPERATION" != rollback \
+                || ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
+                || ! "$DISPATCH_RUN_ID" =~ ^[1-9][0-9]*$ \
+                || ! "$DISPATCH_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ \
+                || "$DISPATCH_ID" \
+                    != "$DISPATCH_RUN_ID-$DISPATCH_RUN_ATTEMPT-recovery" \
+                || ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ \
+                || ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$EXPECTED_COMMIT" =~ ^(none|[0-9a-f]{64})$ ]]; then
+            echo "Invalid recovery dispatch payload" >&2
+            exit 64
+          fi
+          git fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/ci/recovery-source"
+          public_source_sha="$(git rev-parse \
+            'refs/ci/recovery-source^{commit}')"
+          remote_tag_state="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            --jq '[.object.type, .object.sha] | @tsv')"
+          IFS=$'\t' read -r remote_tag_type remote_tag_sha \
+            <<< "$remote_tag_state"
+          if [[ "$remote_tag_type" != commit \
+                || "$remote_tag_sha" != "$public_source_sha" \
+                || "$(wc -w < <(git rev-list --parents -n 1 \
+                    refs/ci/recovery-source))" -ne 1 ]]; then
+            echo "Recovery release tag is not an immutable orphan source snapshot" >&2
+            exit 65
+          fi
+          source_graph="$(git show refs/ci/recovery-source:SOURCE-GRAPH.txt)"
+          graph_source_sha="$(awk -F= \
+            '$1 == "source_sha" { count++; value=$2 }
+             END { if (count == 1) print value }' <<< "$source_graph")"
+          graph_version="$(awk -F= \
+            '$1 == "version" { count++; value=$2 }
+             END { if (count == 1) print value }' <<< "$source_graph")"
+          if [[ "$graph_source_sha" != "$SOURCE_SHA" \
+                || "v$graph_version" != "$RELEASE_TAG" ]]; then
+            echo "Recovery source tag does not match the dispatched private source" >&2
+            exit 65
+          fi
+
+          release_state="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,tagName \
+            --jq '[.isDraft, .isPrerelease, .tagName] | @tsv')"
+          IFS=$'\t' read -r is_draft is_prerelease release_tag \
+            <<< "$release_state"
+          if [[ "$release_tag" != "$RELEASE_TAG" \
+                || "$is_prerelease" != false \
+                || ( "$is_draft" != true && "$is_draft" != false ) \
+                || ( "$OPERATION" == restore && "$is_draft" != false ) ]]; then
+            echo "Recovery release has an invalid state" >&2
+            exit 65
+          fi
+
+          mkdir -p release-assets
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --dir release-assets
+          expected_assets="$(scripts/ci/list-release-assets.sh \
+            "$graph_version" release)"
+          actual_assets="$(find release-assets -maxdepth 1 -type f \
+            -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo "Recovery release asset inventory is not exact" >&2
+            diff -u <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$actual_assets") || true
+            exit 65
+          fi
+          scripts/ci/verify-release-signatures.sh release-assets
+          fingerprint="$(tr -d '[:space:]' < RELEASE_KEY_FINGERPRINT \
+            | tr '[:lower:]' '[:upper:]')"
+          key_fingerprint="$(gpg --batch --with-colons --show-keys \
+            release-assets/megawhisper-release-key.asc \
+            | awk -F: '$1 == "pub" { primary=1; next }
+                $1 == "fpr" && primary { print toupper($10); exit }')"
+          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ \
+                || "$key_fingerprint" != "$fingerprint" ]]; then
+            echo "Recovery release key does not match the pinned fingerprint" >&2
+            exit 65
+          fi
+
+          metadata_file=release-assets/flatpak-pages-recovery.txt
+          declare -A metadata=()
+          while IFS='=' read -r key value; do
+            if [[ -z "$key" || -z "$value" \
+                  || -n "${metadata[$key]+present}" ]]; then
+              echo "Invalid or duplicate recovery metadata field: $key" >&2
+              exit 65
+            fi
+            case "$key" in
+              format|source_run_id|source_sha|public_source_sha|\
+              release_repository|version|flatpak_commit|archive_sha256|\
+              site_source_sha|site_archive_sha256|rollback_commit|\
+              rollback_archive_sha256|rollback_site_source_sha|\
+              rollback_site_archive_sha256)
+                metadata[$key]="$value"
+                ;;
+              *)
+                echo "Unknown recovery metadata field: $key" >&2
+                exit 65
+                ;;
+            esac
+          done < "$metadata_file"
+          for key in format source_run_id source_sha public_source_sha \
+            release_repository version flatpak_commit archive_sha256 \
+            site_source_sha site_archive_sha256 rollback_commit \
+            rollback_archive_sha256 rollback_site_source_sha \
+            rollback_site_archive_sha256; do
+            if [[ -z "${metadata[$key]+present}" ]]; then
+              echo "Missing recovery metadata field: $key" >&2
+              exit 65
+            fi
+          done
+          if [[ "${metadata[format]}" != 3 \
+                || "${metadata[source_run_id]}" != "$SOURCE_RUN_ID" \
+                || "${metadata[source_sha]}" != "$SOURCE_SHA" \
+                || "${metadata[public_source_sha]}" != "$public_source_sha" \
+                || "${metadata[release_repository]}" != "$GITHUB_REPOSITORY" \
+                || "v${metadata[version]}" != "$RELEASE_TAG" \
+                || ! "${metadata[flatpak_commit]}" =~ ^[0-9a-f]{64}$ \
+                || ! "${metadata[archive_sha256]}" =~ ^[0-9a-f]{64}$ \
+                || ! "${metadata[site_source_sha]}" =~ ^[0-9a-f]{40}$ \
+                || ! "${metadata[site_archive_sha256]}" =~ ^[0-9a-f]{64}$ \
+                || ! "${metadata[rollback_commit]}" \
+                    =~ ^(none|[0-9a-f]{64})$ \
+                || ! "${metadata[rollback_archive_sha256]}" \
+                    =~ ^[0-9a-f]{64}$ \
+                || ! "${metadata[rollback_site_source_sha]}" \
+                    =~ ^[0-9a-f]{40}$ \
+                || ! "${metadata[rollback_site_archive_sha256]}" \
+                    =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Signed recovery metadata does not match the dispatch" >&2
+            exit 65
+          fi
+
+          if [[ "$OPERATION" == restore ]]; then
+            if [[ "$EXPECTED_COMMIT" != "${metadata[flatpak_commit]}" ]]; then
+              echo "Requested restore commit differs from signed metadata" >&2
+              exit 65
+            fi
+            scripts/ci/verify-pages-recovery.sh \
+              release-assets recovery-repo recovery-site \
+              "$fingerprint" "$SOURCE_RUN_ID" manifest
+            install -m 0644 release-assets/flatpak-pages-recovery.txt \
+              recovery-repo/flatpak-active-state.txt
+            install -m 0644 release-assets/flatpak-pages-recovery.txt.asc \
+              recovery-repo/flatpak-active-state.txt.asc
+            install -m 0644 release-assets/megawhisper-release-key.asc \
+              recovery-repo/megawhisper-release-key.asc
+            recovery_mode=release
+          else
+            if [[ "$EXPECTED_COMMIT" != "${metadata[rollback_commit]}" ]]; then
+              echo "Requested rollback commit differs from signed metadata" >&2
+              exit 65
+            fi
+            archive=release-assets/MegaWhisper-flatpak-rollback-repo.tar.zst
+            archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+            if [[ "$archive_sha256" \
+                  != "${metadata[rollback_archive_sha256]}" ]]; then
+              echo "Rollback archive differs from signed metadata" >&2
+              exit 65
+            fi
+            mkdir -p recovery-repo
+            while IFS= read -r entry; do
+              case "$entry" in
+                /*|..|../*|*/../*)
+                  echo "Unsafe path in rollback archive: $entry" >&2
+                  exit 65
+                  ;;
+              esac
+            done < <(tar --zstd -tf "$archive")
+            tar --zstd -xf "$archive" \
+              -C recovery-repo --no-same-owner --no-same-permissions
+            ostree fsck --repo=recovery-repo
+            rollback_ref="$(ostree rev-parse --repo=recovery-repo \
+              app/io.github.dxvsi.megawhisper/x86_64/stable \
+              2>/dev/null || true)"
+            if [[ "$EXPECTED_COMMIT" == none ]]; then
+              if [[ -n "$rollback_ref" \
+                    || -e recovery-repo/flatpak-active-state.txt \
+                    || -e recovery-repo/flatpak-active-state.txt.asc ]]; then
+                echo "Empty rollback repository exposes application state" >&2
+                exit 65
+              fi
+            elif [[ "$rollback_ref" != "$EXPECTED_COMMIT" ]]; then
+              echo "Rollback repository does not expose the requested commit" >&2
+              exit 65
+            fi
+
+            state_root="$(mktemp -d)"
+            trap 'rm -rf "$state_root"' EXIT
+            export HOME="$state_root/home"
+            export XDG_DATA_HOME="$state_root/data"
+            export XDG_CONFIG_HOME="$state_root/config"
+            export XDG_CACHE_HOME="$state_root/cache"
+            export XDG_RUNTIME_DIR="$state_root/runtime"
+            install -d -m 0700 "$HOME" "$XDG_DATA_HOME" \
+              "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
+            flatpak remote-add --user \
+              --gpg-import=release-assets/megawhisper-release-key.asc \
+              recovery-local "file://$GITHUB_WORKSPACE/recovery-repo"
+            if [[ "$EXPECTED_COMMIT" == none ]]; then
+              remote_refs="$(flatpak remote-ls --user --columns=ref \
+                recovery-local)"
+              if [[ -n "$remote_refs" ]]; then
+                echo "Signed empty rollback exposes a Flatpak ref" >&2
+                exit 65
+              fi
+            else
+              verified_commit="$(flatpak remote-info --user --show-commit \
+                recovery-local io.github.dxvsi.megawhisper)"
+              if [[ "$verified_commit" != "$EXPECTED_COMMIT" ]]; then
+                echo "Flatpak client rejected the rollback repository" >&2
+                exit 65
+              fi
+            fi
+            site_archive=release-assets/MegaWhisper-pages-rollback-site.tar.zst
+            site_archive_sha256="$(sha256sum "$site_archive" \
+              | awk '{print $1}')"
+            if [[ "$site_archive_sha256" \
+                  != "${metadata[rollback_site_archive_sha256]}" ]]; then
+              echo "Rollback site archive differs from signed metadata" >&2
+              exit 65
+            fi
+            mkdir -p recovery-site
+            while IFS= read -r entry; do
+              case "$entry" in
+                /*|..|../*|*/../*)
+                  echo "Unsafe path in rollback site archive: $entry" >&2
+                  exit 65
+                  ;;
+              esac
+            done < <(tar --zstd -tf "$site_archive")
+            tar --zstd -xf "$site_archive" \
+              -C recovery-site --no-same-owner --no-same-permissions
+            scripts/ci/verify-pages-site.sh \
+              recovery-site rollback manifest
+            recovery_mode=rollback
+          fi
+          scripts/ci/assemble-pages-state.sh \
+            recovery-site recovery-repo recovery-pages \
+            "$EXPECTED_COMMIT" "$recovery_mode"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "mode=$recovery_mode" >> "$GITHUB_OUTPUT"
+
+      - name: Configure public recovery deployment
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload verified complete recovery state
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: pages-recovery-${{ github.run_attempt }}
+          path: recovery-pages
+          retention-days: 1
+          include-hidden-files: true
+
+      - id: recovery-deployment
+        name: Deploy verified complete recovery state
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: pages-recovery-${{ github.run_attempt }}
+
+      - name: Verify live recovered site and repository
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+          FINGERPRINT: ${{ steps.recovery-state.outputs.fingerprint }}
+          RECOVERY_MODE: ${{ steps.recovery-state.outputs.mode }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck disable=SC2153
+          scripts/ci/verify-live-pages-state.sh \
+            "$FLATPAK_REPO_URL" recovery-pages recovery-site "$FINGERPRINT" \
+            "$EXPECTED_COMMIT" \
+            "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-recovery" \
+            "$RECOVERY_MODE"

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /objects/
+Disallow: /deltas/
+Disallow: /tmp/
+
+Sitemap: https://dxvsi.github.io/MegaWhisper/sitemap.xml

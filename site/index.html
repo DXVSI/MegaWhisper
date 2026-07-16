@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#11171c">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+  <meta
+    name="description"
+    content="Private local and OpenAI-compatible speech transcription for the Linux desktop. Install MegaWhisper with Flatpak or run the portable AppImage.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="MegaWhisper">
+  <meta property="og:title" content="MegaWhisper | Speech to text for Linux">
+  <meta
+    property="og:description"
+    content="Local-first dictation and cloud transcription with explicit output controls for Linux.">
+  <meta property="og:url" content="https://dxvsi.github.io/MegaWhisper/">
+  <meta property="og:image" content="https://dxvsi.github.io/MegaWhisper/img/history.png">
+  <meta property="og:image:alt" content="MegaWhisper recording history on a Linux desktop">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://dxvsi.github.io/MegaWhisper/">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/site.css">
+  <title>MegaWhisper | Speech to text for Linux</title>
+</head>
+<body data-release-state="available">
+  <a
+    class="skip-link"
+    href="#main"
+    data-ru="Перейти к содержанию">Skip to content</a>
+
+  <header class="site-header" data-site-header>
+    <div class="shell header-inner">
+      <a
+        class="brand"
+        href="#top"
+        aria-label="MegaWhisper home"
+        data-aria-ru="Главная MegaWhisper"
+        data-home-link>
+        <img src="assets/icon.svg" width="36" height="36" alt="">
+        <span class="brand-copy">
+          <strong>MegaWhisper</strong>
+          <span data-ru="Транскрибация для Linux">Transcription for Linux</span>
+        </span>
+      </a>
+
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        aria-label="Open navigation"
+        data-aria-ru="Открыть навигацию"
+        data-nav-toggle>
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <nav
+        id="site-navigation"
+        class="site-nav"
+        aria-label="Primary navigation"
+        data-aria-ru="Основная навигация"
+        data-nav>
+        <a href="#workflow" data-ru="Как работает">Workflow</a>
+        <a href="#modes" data-ru="Режимы">Modes</a>
+        <a href="#privacy" data-ru="Приватность">Privacy</a>
+        <a href="#screenshots" data-ru="Интерфейс">Interface</a>
+        <a href="#install" data-ru="Установка">Install</a>
+      </nav>
+
+      <div class="header-actions">
+        <div
+          class="language-switch"
+          role="group"
+          aria-label="Language"
+          data-aria-ru="Язык">
+          <button type="button" data-language="en" aria-pressed="true">EN</button>
+          <span aria-hidden="true">/</span>
+          <button type="button" data-language="ru" aria-pressed="false">RU</button>
+        </div>
+        <a
+          class="github-link"
+          href="https://github.com/DXVSI/MegaWhisper"
+          aria-label="MegaWhisper on GitHub"
+          data-aria-ru="MegaWhisper на GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.55 9.55 0 0 1 12 6.82c.85 0 1.71.11 2.51.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero section">
+      <div class="hero-rules" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="record-dot" aria-hidden="true"></span>
+            <span data-ru="Голосовой инструмент для рабочего стола">A voice tool for your desktop</span>
+          </p>
+          <h1>
+            <span data-ru="Говорите.">Speak.</span>
+            <span class="title-accent" data-ru="Текст остается под вашим контролем.">Keep the text under your control.</span>
+          </h1>
+          <p
+            class="hero-lead"
+            data-ru="MegaWhisper превращает речь в текст прямо на Linux. Работайте полностью локально или подключите OpenAI-совместимый сервер, затем копируйте либо вставляйте результат выбранным способом.">
+            MegaWhisper turns speech into text on Linux. Work fully offline or connect an
+            OpenAI-compatible server, then copy or insert the result using an explicit output mode.
+          </p>
+
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://github.com/DXVSI/MegaWhisper/releases/latest/download/io.github.dxvsi.megawhisper.flatpakref"
+              data-release-only
+              data-ru="Установить Flatpak">
+              Install Flatpak
+            </a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/DXVSI/MegaWhisper/releases/latest"
+              data-release-only
+              data-ru="Открыть последний релиз">
+              Open latest release
+            </a>
+          </div>
+
+          <ul class="hero-facts" aria-label="Product facts">
+            <li>
+              <span class="fact-key">01</span>
+              <span data-ru="Локально без сети">Local without a network</span>
+            </li>
+            <li>
+              <span class="fact-key">02</span>
+              <span data-ru="Flatpak с desktop portal">Flatpak with desktop portals</span>
+            </li>
+            <li>
+              <span class="fact-key">03</span>
+              <span>GPL-3.0-only</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="hero-stage">
+          <div class="stage-index" aria-hidden="true">MW / 02.00</div>
+          <div class="app-window">
+            <div class="app-titlebar">
+              <div class="window-identity">
+                <img src="assets/icon.svg" width="24" height="24" alt="">
+                <span>MegaWhisper</span>
+              </div>
+              <div class="window-controls" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+            <div class="app-surface">
+              <img
+                src="img/main.png"
+                width="900"
+                height="676"
+                alt="Current MegaWhisper main window"
+                data-alt-ru="Текущее главное окно MegaWhisper">
+            </div>
+            <div class="signal-overlay" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+          <div class="stage-note note-local">
+            <span class="note-code">LOCAL</span>
+            <strong data-ru="Аудио остается на устройстве">Audio stays on-device</strong>
+          </div>
+          <div class="stage-note note-output">
+            <span class="note-code">REC STATE</span>
+            <strong data-ru="Красный индикатор появляется в tray">Red indicator appears in the tray</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="signal-rail"
+      aria-label="MegaWhisper process"
+      data-aria-ru="Процесс MegaWhisper">
+      <div class="shell signal-rail-inner">
+        <span class="rail-label" data-ru="Вход">INPUT</span>
+        <div class="rail-wave" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <span class="rail-center" data-ru="локально / cloud">local / cloud</span>
+        <div class="rail-line" aria-hidden="true"></div>
+        <span class="rail-label" data-ru="Текст">TEXT</span>
+      </div>
+    </section>
+
+    <section id="workflow" class="section workflow-section">
+      <div class="shell">
+        <div class="section-heading split-heading">
+          <div>
+            <p class="section-kicker">01 / WORKFLOW</p>
+            <h2 data-ru="Одна клавиша. Два нажатия.">One shortcut. Two presses.</h2>
+          </div>
+          <p
+            data-ru="Выберите свободную комбинацию с английской буквой. Первое нажатие начинает запись, следующее завершает ее и запускает транскрибацию.">
+            Choose a free shortcut with a Latin letter. The first press starts recording.
+            The next press stops it and begins transcription.
+          </p>
+        </div>
+
+        <ol class="workflow-track">
+          <li>
+            <div class="step-marker"><span>1</span></div>
+            <div class="step-content">
+              <p class="step-label" data-ru="НАЖАТИЕ">PRESS</p>
+              <h3 data-ru="Начните говорить">Start speaking</h3>
+              <p
+                data-ru="Global Shortcuts portal регистрирует комбинацию без root, input group или привилегированного демона.">
+                The Global Shortcuts portal registers the shortcut without root, the input group,
+                or a privileged daemon.
+              </p>
+            </div>
+            <kbd>Ctrl + \</kbd>
+          </li>
+          <li>
+            <div class="step-marker recording"><span>2</span></div>
+            <div class="step-content">
+              <p class="step-label" data-ru="ЗАПИСЬ">RECORD</p>
+              <h3 data-ru="Следите за реальным состоянием">See the real state</h3>
+              <p
+                data-ru="Иконка получает красный индикатор только после подтвержденного начала аудиозахвата.">
+                The icon gains its red indicator only after audio capture has actually started.
+              </p>
+            </div>
+            <img src="assets/icon-recording.svg" width="54" height="54" alt="">
+          </li>
+          <li>
+            <div class="step-marker"><span>3</span></div>
+            <div class="step-content">
+              <p class="step-label" data-ru="РЕЗУЛЬТАТ">RESULT</p>
+              <h3 data-ru="Получите редактируемый текст">Get editable text</h3>
+              <p
+                data-ru="Точный результат сначала сохраняется в буфере обмена. Дополнительная вставка выполняется только выбранным режимом.">
+                The exact result reaches the clipboard first. Any additional insertion follows the
+                output mode you selected.
+              </p>
+            </div>
+            <span class="result-caret" aria-hidden="true">Aa|</span>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="modes" class="section modes-section">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="section-kicker">02 / PROCESSING</p>
+          <h2 data-ru="Вы сами решаете, где распознавать речь.">You decide where speech is processed.</h2>
+        </div>
+
+        <div class="mode-layout">
+          <article class="mode-panel mode-local">
+            <div class="mode-topline">
+              <span class="mode-number">A</span>
+              <span class="mode-status">
+                <span class="status-light"></span>
+                <span data-ru="Офлайн после загрузки модели">Offline after model download</span>
+              </span>
+            </div>
+            <p class="mode-overline">LOCAL WHISPER</p>
+            <h3 data-ru="Приватно на вашем компьютере">Private on your machine</h3>
+            <p
+              data-ru="Проверенные GGML-модели работают через whisper.cpp. Vulkan используется при доступности, а CPU остается контролируемым fallback.">
+              Verified GGML models run through whisper.cpp. Vulkan is used when available, with a
+              controlled CPU fallback.
+            </p>
+            <dl class="mode-specs">
+              <div>
+                <dt data-ru="Сеть">Network</dt>
+                <dd data-ru="Не нужна для транскрибации">Not required for transcription</dd>
+              </div>
+              <div>
+                <dt data-ru="Аудио">Audio</dt>
+                <dd data-ru="Не покидает устройство">Stays on the device</dd>
+              </div>
+              <div>
+                <dt data-ru="Ускорение">Acceleration</dt>
+                <dd>Vulkan / CPU</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="mode-panel mode-cloud">
+            <div class="mode-topline">
+              <span class="mode-number">B</span>
+              <span class="mode-status">
+                <span class="status-light cloud"></span>
+                <span data-ru="Явное сетевое задание">Explicit network job</span>
+              </span>
+            </div>
+            <p class="mode-overline">OPENAI-COMPATIBLE</p>
+            <h3 data-ru="Ваш endpoint и model ID">Your endpoint and model ID</h3>
+            <p
+              data-ru="Используйте встроенный OpenAI или HTTPS-сервер с совместимым audio/transcriptions API. Перед сохранением конфигурация проходит реальную проверку.">
+              Use built-in OpenAI or an HTTPS server with a compatible audio/transcriptions API.
+              The configuration is verified before it becomes active.
+            </p>
+            <dl class="mode-specs">
+              <div>
+                <dt>Base URL</dt>
+                <dd>HTTPS / loopback HTTP</dd>
+              </div>
+              <div>
+                <dt data-ru="Авторизация">Authentication</dt>
+                <dd data-ru="Bearer key или без ключа">Bearer key or no key</dd>
+              </div>
+              <div>
+                <dt data-ru="Секрет">Secret</dt>
+                <dd data-ru="Защищенное хранилище">Protected credential storage</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section output-section">
+      <div class="shell output-grid">
+        <div class="section-heading output-heading">
+          <p class="section-kicker">03 / OUTPUT</p>
+          <h2 data-ru="Вставка не должна быть скрытым действием.">Insertion should never be a hidden action.</h2>
+          <p
+            data-ru="MegaWhisper сначала сохраняет точный текст в буфер обмена. Выберите поведение, которое подходит вашему desktop и рабочему процессу.">
+            MegaWhisper puts the exact text in the clipboard first. Choose the behavior that fits
+            your desktop and workflow.
+          </p>
+        </div>
+
+        <div class="output-table">
+          <article class="output-row recommended">
+            <div class="output-index">01</div>
+            <div>
+              <p class="output-tag" data-ru="ПО УМОЛЧАНИЮ">DEFAULT</p>
+              <h3 data-ru="Только буфер обмена">Clipboard only</h3>
+            </div>
+            <p
+              data-ru="Никаких синтетических нажатий. Вставляйте тогда и туда, куда хотите.">
+              No synthetic key press. Paste when and where you choose.
+            </p>
+          </article>
+          <article class="output-row">
+            <div class="output-index">02</div>
+            <div>
+              <p class="output-tag">BETA</p>
+              <h3 data-ru="С подтверждением">Confirmation-based</h3>
+            </div>
+            <p
+              data-ru="Вторая глобальная комбинация подтверждает одну попытку вставки в активном окне.">
+              A second global shortcut confirms one insertion attempt in the active window.
+            </p>
+          </article>
+          <article class="output-row">
+            <div class="output-index">03</div>
+            <div>
+              <p class="output-tag">BETA</p>
+              <h3 data-ru="Автоматическая попытка">Automatic attempt</h3>
+            </div>
+            <p
+              data-ru="Одна немедленная попытка после транскрибации, без отложенных повторов.">
+              One immediate attempt after transcription, with no delayed retry.
+            </p>
+          </article>
+          <div class="output-footnote">
+            <span class="shortcut-chip">Shift + Insert</span>
+            <p
+              data-ru="Рекомендуемый Linux-профиль. Фактическая совместимость зависит от desktop portal и целевого приложения.">
+              Recommended Linux profile. Actual compatibility depends on the desktop portal and
+              target application.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy" class="section privacy-section">
+      <div class="shell privacy-layout">
+        <div class="privacy-statement">
+          <p class="section-kicker">04 / PRIVACY</p>
+          <h2 data-ru="Локально означает локально.">Local means local.</h2>
+          <p
+            data-ru="В Local-режиме сетевой сервис не получает аудио. В Cloud-режиме приложение явно показывает выбранный сервер и отправляет только данные текущего задания.">
+            In Local mode, no network transcription service receives the audio. In Cloud mode,
+            the selected server is explicit and only the current job data is sent.
+          </p>
+          <a
+            class="text-link"
+            href="https://github.com/DXVSI/MegaWhisper#privacy"
+            data-ru="Прочитать политику поведения">
+            Read the behavior policy
+          </a>
+        </div>
+
+        <div class="privacy-ledger" role="list">
+          <div role="listitem">
+            <span class="ledger-code">AUDIO</span>
+            <strong data-ru="Retention выбирает пользователь">User-selected retention</strong>
+            <p
+              data-ru="Session, сохраняемое аудио или text-only с временным retry-аудио до 10 минут в текущем сеансе.">
+              Session, retained audio, or text-only with bounded retry audio for up to 10 minutes
+              in the current session.
+            </p>
+          </div>
+          <div role="listitem">
+            <span class="ledger-code">KEY</span>
+            <strong data-ru="Не хранится в обычных настройках">Not stored in plain settings</strong>
+            <p data-ru="Secret привязан к origin активного endpoint.">The secret is bound to the active endpoint origin.</p>
+          </div>
+          <div role="listitem">
+            <span class="ledger-code">SITE</span>
+            <strong data-ru="Без аналитики и cookies">No analytics or cookies</strong>
+            <p data-ru="Эта страница не отправляет telemetry.">This page sends no telemetry.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshots" class="section screenshots-section">
+      <div class="shell">
+        <div class="section-heading split-heading">
+          <div>
+            <p class="section-kicker">05 / INTERFACE</p>
+            <h2 data-ru="Настоящий desktop UI.">A real desktop interface.</h2>
+          </div>
+          <p
+            data-ru="Настройки моделей, вывода, перевода и история остаются обычными окнами Linux, а не скрываются за web dashboard.">
+            Models, output, translation, and history stay in ordinary Linux windows instead of a
+            remote web dashboard.
+          </p>
+        </div>
+
+        <div class="screenshot-editorial">
+          <figure class="screenshot-feature">
+            <a href="img/history.png">
+              <img
+                src="img/history.png"
+                width="1053"
+                height="711"
+                loading="lazy"
+                alt="Current MegaWhisper history, variants, comparison, and export controls"
+                data-alt-ru="Текущая история MegaWhisper с вариантами, сравнением и экспортом">
+            </a>
+            <figcaption>
+              <span>01</span>
+              <div>
+                <strong data-ru="История и варианты результата">History and result variants</strong>
+                <p
+                  data-ru="Поиск, варианты результата, сравнение и экспорт остаются локальными desktop controls.">
+                  Search, result variants, comparison, and export remain local desktop controls.
+                </p>
+              </div>
+            </figcaption>
+          </figure>
+
+          <div class="screenshot-stack">
+            <figure>
+              <a href="img/settings-local.png">
+                <img
+                  src="img/settings-local.png"
+                  width="832"
+                  height="800"
+                  loading="lazy"
+                  alt="Current MegaWhisper local model and VAD settings"
+                  data-alt-ru="Текущие настройки локальной модели и VAD в MegaWhisper">
+              </a>
+              <figcaption>
+                <span>02</span>
+                <strong data-ru="Локальная модель">Local model</strong>
+              </figcaption>
+            </figure>
+            <figure>
+              <a href="img/settings-cloud.png">
+                <img
+                  src="img/settings-cloud.png"
+                  width="830"
+                  height="969"
+                  loading="lazy"
+                  alt="Current MegaWhisper OpenAI-compatible endpoint settings"
+                  data-alt-ru="Текущие настройки OpenAI-совместимого endpoint в MegaWhisper">
+              </a>
+              <figcaption>
+                <span>03</span>
+                <strong data-ru="OpenAI-совместимый endpoint">OpenAI-compatible endpoint</strong>
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+
+        <div class="screenshot-strip">
+          <a href="img/settings-behavior.png">
+            <img
+              src="img/settings-behavior.png"
+              width="830"
+              height="969"
+              loading="lazy"
+              alt="Current MegaWhisper shortcut, output, and privacy settings"
+              data-alt-ru="Текущие настройки комбинаций, вывода и приватности MegaWhisper">
+            <span data-ru="Поведение">Behavior</span>
+          </a>
+          <a href="img/settings-audio.png">
+            <img
+              src="img/settings-audio.png"
+              width="830"
+              height="969"
+              loading="lazy"
+              alt="Current MegaWhisper microphone test settings"
+              data-alt-ru="Текущие настройки проверки микрофона MegaWhisper">
+            <span data-ru="Аудио">Audio</span>
+          </a>
+          <a href="img/settings-translation.png">
+            <img
+              src="img/settings-translation.png"
+              width="830"
+              height="969"
+              loading="lazy"
+              alt="Current MegaWhisper translation settings"
+              data-alt-ru="Текущие настройки перевода MegaWhisper">
+            <span data-ru="Перевод">Translation</span>
+          </a>
+          <a href="img/settings-system.png">
+            <img
+              src="img/settings-system.png"
+              width="830"
+              height="969"
+              loading="lazy"
+              alt="Current MegaWhisper interface language and startup settings"
+              data-alt-ru="Текущие настройки языка интерфейса и автозапуска MegaWhisper">
+            <span data-ru="Система">System</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section install-section">
+      <div class="shell">
+        <div class="install-header">
+          <p class="section-kicker">06 / INSTALL</p>
+          <h2 data-ru="Начните со стабильного Flatpak.">Start with the stable Flatpak.</h2>
+          <p
+            data-ru="Один подписанный канал для обычных и immutable Linux-систем при совместимом desktop portal. AppImage доступен как переносимая альтернатива.">
+            One signed channel for traditional and immutable Linux systems with a compatible
+            desktop portal. AppImage remains available as a portable alternative.
+          </p>
+        </div>
+
+        <div class="install-layout">
+          <article class="install-primary" data-release-only>
+            <div class="install-titleline">
+              <div>
+                <span class="install-badge" data-ru="РЕКОМЕНДУЕТСЯ">RECOMMENDED</span>
+                <h3>Flatpak</h3>
+              </div>
+              <span class="platform-mark">x86_64</span>
+            </div>
+            <p
+              data-ru="Скачайте подписанный flatpakref или установите его прямо из терминала. Remote обновлений добавится автоматически.">
+              Download the signed flatpakref or install it directly from the terminal. The update
+              remote is added automatically.
+            </p>
+            <div class="command-block">
+              <code id="flatpak-command">flatpak install -y --user https://github.com/DXVSI/MegaWhisper/releases/latest/download/io.github.dxvsi.megawhisper.flatpakref</code>
+              <button
+                type="button"
+                data-copy-target="flatpak-command"
+                data-copy-label="Copy"
+                data-copy-label-ru="Копировать"
+                data-copied-label="Copied"
+                data-copied-label-ru="Скопировано"
+                data-copied-aria-label="Flatpak command copied"
+                data-copied-aria-label-ru="Команда установки Flatpak скопирована"
+                aria-label="Copy Flatpak installation command"
+                data-aria-ru="Копировать команду установки Flatpak"
+                aria-live="polite">
+                Copy
+              </button>
+            </div>
+            <div class="install-actions">
+              <a
+                class="button button-primary"
+                href="https://github.com/DXVSI/MegaWhisper/releases/latest/download/io.github.dxvsi.megawhisper.flatpakref"
+                data-ru="Скачать .flatpakref">
+                Download .flatpakref
+              </a>
+              <a
+                class="text-link"
+                href="https://github.com/DXVSI/MegaWhisper/blob/main/INSTALL.md"
+                data-ru="Подписи и проверка">
+                Signatures and verification
+              </a>
+            </div>
+          </article>
+
+          <aside class="install-secondary" data-release-only>
+            <span class="install-badge">PORTABLE</span>
+            <h3>AppImage</h3>
+            <p
+              data-ru="Запускается без установки. Global Shortcuts и системная вставка требуют явной per-user desktop integration.">
+              Runs without installation. Global Shortcuts and system insertion require explicit
+              per-user desktop integration.
+            </p>
+            <ul>
+              <li data-ru="Не заменяет установленный Flatpak">Does not replace an installed Flatpak</li>
+              <li data-ru="Проверяемые checksums и подписи">Verifiable checksums and signatures</li>
+              <li data-ru="Desktop integration можно удалить">Removable desktop integration</li>
+            </ul>
+            <a
+              class="button button-secondary"
+              href="https://github.com/DXVSI/MegaWhisper/releases/latest"
+              data-ru="Выбрать AppImage в релизе">
+              Get AppImage from the release
+            </a>
+          </aside>
+
+          <aside class="release-unavailable">
+            <span class="install-badge" data-ru="БЕЗОПАСНЫЙ ОТКАТ">SAFE ROLLBACK</span>
+            <h3 data-ru="Установка временно недоступна">Installation is temporarily unavailable</h3>
+            <p
+              data-ru="Страница восстановлена, но стабильный подписанный релиз еще не опубликован. Проверьте GitHub позже.">
+              The project page is available, but a signed stable release has not been published.
+              Check GitHub again later.
+            </p>
+            <a
+              class="button button-secondary"
+              href="https://github.com/DXVSI/MegaWhisper"
+              data-ru="Открыть репозиторий">
+              Open repository
+            </a>
+          </aside>
+        </div>
+
+        <div class="compatibility-note">
+          <span class="note-index">NOTE</span>
+          <p
+            data-ru="Tray и глобальные комбинации зависят от реализации desktop portal. На desktop без StatusNotifier host MegaWhisper остается обычным оконным приложением.">
+            Tray and global shortcuts depend on the desktop portal implementation. On a desktop
+            without a StatusNotifier host, MegaWhisper remains an ordinary windowed application.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section about-section">
+      <div class="shell about-layout">
+        <div>
+          <p class="section-kicker">07 / PROJECT</p>
+          <h2 data-ru="Открытый Linux-инструмент без скрытого сервиса.">An open Linux tool, not a hidden service.</h2>
+        </div>
+        <div class="about-copy">
+          <p
+            data-ru="MegaWhisper распространяется по GPL-3.0-only. Исходные snapshots, SBOM, checksums, подписи и provenance публикуются вместе с релизом.">
+            MegaWhisper is distributed under GPL-3.0-only. Source snapshots, SBOMs, checksums,
+            signatures, and provenance are published with each release.
+          </p>
+          <div class="author-line">
+            <span data-ru="Автор">Author</span>
+            <a href="https://github.com/DXVSI">DXVSI</a>
+          </div>
+          <div class="project-links">
+            <a href="https://github.com/DXVSI/MegaWhisper" data-ru="Репозиторий">Repository</a>
+            <a href="https://github.com/DXVSI/MegaWhisper/releases" data-ru="Релизы">Releases</a>
+            <a href="https://github.com/DXVSI/MegaWhisper/issues" data-ru="Сообщить о проблеме">Report an issue</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <div class="footer-brand">
+        <img src="assets/icon.svg" width="28" height="28" alt="">
+        <span>MegaWhisper</span>
+      </div>
+      <p>
+        <span data-ru="Создано для Linux автором">Built for Linux by</span>
+        <a href="https://github.com/DXVSI">DXVSI</a>.
+      </p>
+      <a class="back-to-top" href="#top" data-ru="Наверх ↑">Back to top ↑</a>
+    </div>
+  </footer>
+
+  <script src="assets/site.js" defer></script>
+</body>
+</html>
