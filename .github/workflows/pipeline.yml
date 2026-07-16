@@ -579,10 +579,12 @@ jobs:
           fi
           echo "state=unknown" >> "$GITHUB_OUTPUT"
           if published_json="$(gh api --method PATCH \
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               -f tag_name="$RELEASE_TAG" \
               -f target_commitish="$target_commitish" \
               -F draft=false \
+              -F prerelease=false \
               -f make_latest="$make_latest")"; then
             published_tag="$(jq -r '.tag_name // empty' \
               <<< "$published_json")"
