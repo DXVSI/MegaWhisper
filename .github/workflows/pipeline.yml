@@ -148,11 +148,8 @@ jobs:
           git fetch --force --no-tags origin \
             "+refs/tags/$RELEASE_TAG:refs/ci/public-source"
           public_tag_sha="$(git rev-parse 'refs/ci/public-source^{commit}')"
-          remote_tag_state="$(gh api \
-            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
-            --jq '[.object.type, .object.sha] | @tsv')"
-          IFS=$'\t' read -r remote_tag_type remote_tag_sha \
-            <<< "$remote_tag_state"
+          remote_tag_type="$(git cat-file -t refs/ci/public-source)"
+          remote_tag_sha="$(git rev-parse refs/ci/public-source)"
           source_graph="$(git show refs/ci/public-source:SOURCE-GRAPH.txt)"
           metadata_source_sha="$(awk -F= \
             '$1 == "source_sha" { count++; value=$2 }
@@ -174,8 +171,23 @@ jobs:
             exit 65
           fi
 
-          releases_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          fetch_release_list() {
+            local attempt candidate
+            for attempt in 1 2 3; do
+              echo "Fetching public release list, attempt $attempt of 3" >&2
+              if candidate="$(gh api \
+                  "repos/$GITHUB_REPOSITORY/releases?per_page=100")" \
+                  && jq -e 'type == "array"' <<< "$candidate" >/dev/null; then
+                printf '%s' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+          releases_json="$(fetch_release_list)" || {
+            echo "Public release list remained unavailable" >&2
+            exit 69
+          }
           release_json="$(jq -c --arg tag "$RELEASE_TAG" \
             '[.[] | select(.tag_name == $tag)]
              | if length == 1 then .[0] else empty end' \
@@ -204,21 +216,39 @@ jobs:
             echo "Public release asset inventory is empty or ambiguous" >&2
             exit 65
           fi
-          while IFS=$'\t' read -r asset_id asset_name asset_state asset_size; do
+          while IFS=$'\t' read -r asset_id asset_name asset_state asset_size \
+              asset_digest; do
             if [[ ! "$asset_id" =~ ^[1-9][0-9]*$ \
                   || ! "$asset_name" \
                       =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ \
                   || "$asset_state" != uploaded \
-                  || ! "$asset_size" =~ ^[1-9][0-9]*$ ]]; then
+                  || ! "$asset_size" =~ ^[1-9][0-9]*$ \
+                  || ! "$asset_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
               echo "Public release contains an invalid asset entry" >&2
               exit 65
             fi
-            gh api --header 'Accept: application/octet-stream' \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
-              > "release-assets/$asset_name"
+            asset_path="release-assets/$asset_name"
+            asset_downloaded=0
+            for attempt in 1 2 3; do
+              echo "Downloading $asset_name, attempt $attempt of 3"
+              rm -f "$asset_path"
+              if gh api --header 'Accept: application/octet-stream' \
+                    "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+                    > "$asset_path" \
+                  && [[ "$(stat -c '%s' "$asset_path")" == "$asset_size" ]] \
+                  && [[ "sha256:$(sha256sum "$asset_path" \
+                        | awk '{print $1}')" == "$asset_digest" ]]; then
+                asset_downloaded=1
+                break
+              fi
+            done
+            if [[ "$asset_downloaded" -ne 1 ]]; then
+              echo "Public release asset remained unavailable: $asset_name" >&2
+              exit 69
+            fi
           done < <(
             jq -r '.assets[]
-              | [.id, .name, .state, .size]
+              | [.id, .name, .state, .size, .digest]
               | @tsv' <<< "$release_json"
           )
           scripts/ci/verify-release-signatures.sh release-assets
@@ -539,8 +569,23 @@ jobs:
             echo "Public release ID is invalid" >&2
             exit 65
           fi
-          releases_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          fetch_release_list() {
+            local attempt candidate
+            for attempt in 1 2 3; do
+              echo "Fetching public release list, attempt $attempt of 3" >&2
+              if candidate="$(gh api \
+                  "repos/$GITHUB_REPOSITORY/releases?per_page=100")" \
+                  && jq -e 'type == "array"' <<< "$candidate" >/dev/null; then
+                printf '%s' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+          releases_json="$(fetch_release_list)" || {
+            echo "Public release list remained unavailable" >&2
+            exit 69
+          }
           release_json="$(jq -c --argjson id "$release_id" \
             --arg tag "$RELEASE_TAG" \
             '[.[] | select(.id == $id and .tag_name == $tag)]
@@ -566,10 +611,9 @@ jobs:
             echo "Public release draft state is invalid" >&2
             exit 65
           fi
-          published_tags="$(gh api --paginate \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq '.[] | select(.draft == false and .prerelease == false)
-              | .tag_name')"
+          published_tags="$(jq -r \
+            '.[] | select(.draft == false and .prerelease == false)
+              | .tag_name' <<< "$releases_json")"
           highest_tag="$(printf '%s\n%s\n' "$RELEASE_TAG" "$published_tags" \
             | sed '/^$/d' | LC_ALL=C sort -V | tail -n 1)"
           if [[ "$highest_tag" == "$RELEASE_TAG" ]]; then
@@ -590,9 +634,13 @@ jobs:
               <<< "$published_json")"
             published_draft="$(jq -r '.draft // empty' \
               <<< "$published_json")"
-            observed_draft="$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq ".[] | select(.id == $release_id) | .draft")"
+            observed_releases="$(fetch_release_list)" || observed_releases=""
+            observed_draft=""
+            if [[ -n "$observed_releases" ]]; then
+              observed_draft="$(jq -r --argjson id "$release_id" \
+                '.[] | select(.id == $id) | .draft' \
+                <<< "$observed_releases")"
+            fi
             if [[ "$published_tag" == "$RELEASE_TAG" \
                   && "$published_draft" == false \
                   && "$observed_draft" == false ]]; then
@@ -693,11 +741,8 @@ jobs:
             "+refs/tags/$RELEASE_TAG:refs/ci/recovery-source"
           public_source_sha="$(git rev-parse \
             'refs/ci/recovery-source^{commit}')"
-          remote_tag_state="$(gh api \
-            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
-            --jq '[.object.type, .object.sha] | @tsv')"
-          IFS=$'\t' read -r remote_tag_type remote_tag_sha \
-            <<< "$remote_tag_state"
+          remote_tag_type="$(git cat-file -t refs/ci/recovery-source)"
+          remote_tag_sha="$(git rev-parse refs/ci/recovery-source)"
           if [[ "$remote_tag_type" != commit \
                 || "$remote_tag_sha" != "$public_source_sha" \
                 || "$(wc -w < <(git rev-list --parents -n 1 \
