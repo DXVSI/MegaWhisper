@@ -12,6 +12,7 @@ readonly expected_state_dir
 readonly expected_fingerprint="${3^^}"
 readonly expected_commit="$4"
 readonly cache_nonce="$5"
+readonly app_ref="app/io.github.dxvsi.megawhisper/x86_64/stable"
 
 if [[ ! "$repository_url" =~ ^https:// ]]; then
     echo "repository URL must use HTTPS" >&2
@@ -214,4 +215,21 @@ if [[ "$live_commit" != "$expected_commit" ]]; then
     exit 65
 fi
 
-echo "Live signed Flatpak state verified for commit $expected_commit"
+delta_pull_repo="$work_dir/delta-pull-repo"
+ostree init --repo="$delta_pull_repo" --mode=bare-user-only >/dev/null
+ostree remote add --repo="$delta_pull_repo" \
+    --gpg-import="$work_dir/megawhisper-release-key.asc" \
+    megawhisper-delta "$repository_url"
+ostree pull --repo="$delta_pull_repo" \
+    --require-static-deltas \
+    --depth=0 \
+    --network-retries=3 \
+    megawhisper-delta "$app_ref"
+delta_commit="$(ostree rev-parse --repo="$delta_pull_repo" \
+    "megawhisper-delta:$app_ref")"
+if [[ "$delta_commit" != "$expected_commit" ]]; then
+    echo "live signed static delta resolved an unexpected commit" >&2
+    exit 65
+fi
+
+echo "Live signed Flatpak state and static delta verified for commit $expected_commit"
