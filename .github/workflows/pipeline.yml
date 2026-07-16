@@ -174,21 +174,53 @@ jobs:
             exit 65
           fi
 
-          release_state="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,isPrerelease,tagName \
-            --jq '[.isDraft, .isPrerelease, .tagName] | @tsv')"
-          IFS=$'\t' read -r is_draft is_prerelease release_tag <<< "$release_state"
+          releases_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          release_json="$(jq -c --arg tag "$RELEASE_TAG" \
+            '[.[] | select(.tag_name == $tag)]
+             | if length == 1 then .[0] else empty end' \
+            <<< "$releases_json")"
+          if [[ -z "$release_json" ]]; then
+            echo "Public release list did not return one exact release" >&2
+            exit 65
+          fi
+          release_id="$(jq -r '.id // empty' <<< "$release_json")"
+          is_draft="$(jq -r '.draft // empty' <<< "$release_json")"
+          is_prerelease="$(jq -r '.prerelease // empty' <<< "$release_json")"
+          release_tag="$(jq -r '.tag_name // empty' <<< "$release_json")"
           if [[ "$is_prerelease" != false || "$release_tag" != "$RELEASE_TAG" \
+                || ! "$release_id" =~ ^[1-9][0-9]*$ \
                 || ( "$is_draft" != true && "$is_draft" != false ) ]]; then
             echo "Public release has an invalid identity or state" >&2
             exit 65
           fi
 
           mkdir -p release-assets
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir release-assets
+          asset_count="$(jq '.assets | length' <<< "$release_json")"
+          unique_asset_count="$(jq '[.assets[].name] | unique | length' \
+            <<< "$release_json")"
+          if [[ ! "$asset_count" =~ ^[1-9][0-9]*$ \
+                || "$unique_asset_count" != "$asset_count" ]]; then
+            echo "Public release asset inventory is empty or ambiguous" >&2
+            exit 65
+          fi
+          while IFS=$'\t' read -r asset_id asset_name asset_state asset_size; do
+            if [[ ! "$asset_id" =~ ^[1-9][0-9]*$ \
+                  || ! "$asset_name" \
+                      =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ \
+                  || "$asset_state" != uploaded \
+                  || ! "$asset_size" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Public release contains an invalid asset entry" >&2
+              exit 65
+            fi
+            gh api --header 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "release-assets/$asset_name"
+          done < <(
+            jq -r '.assets[]
+              | [.id, .name, .state, .size]
+              | @tsv' <<< "$release_json"
+          )
           scripts/ci/verify-release-signatures.sh release-assets
           expected_assets="$(scripts/ci/list-release-assets.sh \
             "$RELEASE_VERSION" release)"
@@ -333,6 +365,7 @@ jobs:
           else
             echo "mode=reconciled" >> "$GITHUB_OUTPUT"
           fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
           echo "site_source_sha=$metadata_site_source" >> "$GITHUB_OUTPUT"
 
@@ -497,16 +530,32 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.state.outputs.release_id }}
         run: |
           set -Eeuo pipefail
           echo "state=pre-mutation" >> "$GITHUB_OUTPUT"
-          release_state="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json databaseId,isDraft \
-            --jq '[.databaseId, .isDraft] | @tsv')"
-          IFS=$'\t' read -r release_id current_draft <<< "$release_state"
+          release_id="$RELEASE_ID"
           if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
             echo "Public release ID is invalid" >&2
+            exit 65
+          fi
+          releases_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          release_json="$(jq -c --argjson id "$release_id" \
+            --arg tag "$RELEASE_TAG" \
+            '[.[] | select(.id == $id and .tag_name == $tag)]
+             | if length == 1 then .[0] else empty end' \
+            <<< "$releases_json")"
+          if [[ -z "$release_json" ]]; then
+            echo "Public release identity changed before publication" >&2
+            exit 65
+          fi
+          current_draft="$(jq -r '.draft // empty' <<< "$release_json")"
+          target_commitish="$(jq -r '.target_commitish // empty' \
+            <<< "$release_json")"
+          if [[ -z "$target_commitish" \
+                || "$target_commitish" == *$'\n'* ]]; then
+            echo "Public release target commitish is invalid" >&2
             exit 65
           fi
           if [[ "$current_draft" == false ]]; then
@@ -529,13 +578,22 @@ jobs:
             make_latest=false
           fi
           echo "state=unknown" >> "$GITHUB_OUTPUT"
-          if gh api --method PATCH \
+          if published_json="$(gh api --method PATCH \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -f tag_name="$RELEASE_TAG" \
+              -f target_commitish="$target_commitish" \
               -F draft=false \
-              -f make_latest="$make_latest" >/dev/null; then
-            observed_draft="$(gh release view "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
-            if [[ "$observed_draft" == false ]]; then
+              -f make_latest="$make_latest")"; then
+            published_tag="$(jq -r '.tag_name // empty' \
+              <<< "$published_json")"
+            published_draft="$(jq -r '.draft // empty' \
+              <<< "$published_json")"
+            observed_draft="$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.id == $release_id) | .draft")"
+            if [[ "$published_tag" == "$RELEASE_TAG" \
+                  && "$published_draft" == false \
+                  && "$observed_draft" == false ]]; then
               echo "state=published" >> "$GITHUB_OUTPUT"
               exit 0
             fi
