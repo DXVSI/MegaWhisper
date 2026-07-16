@@ -1,9 +1,13 @@
 name: MegaWhisper public distribution
 
 run-name: >-
-  MegaWhisper ${{ github.event.client_payload.tag }}
+  MegaWhisper
+  ${{ github.event.client_payload.release_payload.tag
+      || github.event.client_payload.tag }}
   ${{ github.event.client_payload.operation }}
-  dispatch ${{ github.event.client_payload.dispatch_id }}
+  dispatch
+  ${{ github.event.client_payload.release_payload.dispatch_id
+      || github.event.client_payload.dispatch_id }}
 
 on:
   repository_dispatch:
@@ -34,39 +38,60 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       FLATPAK_REPO_URL: https://dxvsi.github.io/MegaWhisper
+      OPERATION: ${{ github.event.client_payload.operation }}
+      SOURCE_RUN_ID: >-
+        ${{ github.event.client_payload.release_payload.source_run_id
+            || github.event.client_payload.source_run_id }}
+      DISPATCH_RUN_ID: >-
+        ${{ github.event.client_payload.release_payload.dispatch_run_id
+            || github.event.client_payload.dispatch_run_id }}
+      DISPATCH_RUN_ATTEMPT: >-
+        ${{ github.event.client_payload.release_payload.dispatch_run_attempt
+            || github.event.client_payload.dispatch_run_attempt }}
+      DISPATCH_ID: >-
+        ${{ github.event.client_payload.release_payload.dispatch_id
+            || github.event.client_payload.dispatch_id }}
+      SOURCE_SHA: >-
+        ${{ github.event.client_payload.release_payload.source_sha
+            || github.event.client_payload.source_sha }}
+      PUBLIC_SOURCE_SHA: >-
+        ${{ github.event.client_payload.release_payload.public_source_sha
+            || github.event.client_payload.public_source_sha }}
+      DISTRIBUTION_SHA: >-
+        ${{ github.event.client_payload.release_payload.distribution_sha
+            || github.event.client_payload.distribution_sha }}
+      RELEASE_TAG: >-
+        ${{ github.event.client_payload.release_payload.tag
+            || github.event.client_payload.tag }}
+      RELEASE_VERSION: >-
+        ${{ github.event.client_payload.release_payload.version
+            || github.event.client_payload.version }}
+      EXPECTED_FLATPAK_COMMIT: >-
+        ${{ github.event.client_payload.release_payload.flatpak_commit
+            || github.event.client_payload.flatpak_commit }}
+      EXPECTED_ROLLBACK_COMMIT: >-
+        ${{ github.event.client_payload.release_payload.rollback_commit
+            || github.event.client_payload.rollback_commit }}
     steps:
       - name: Validate immutable dispatch identity
         shell: bash
-        env:
-          PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
           set -Eeuo pipefail
-          operation="$(jq -r '.operation // empty' <<< "$PAYLOAD")"
-          source_run_id="$(jq -r '.source_run_id // empty' <<< "$PAYLOAD")"
-          dispatch_run_id="$(jq -r '.dispatch_run_id // empty' <<< "$PAYLOAD")"
-          dispatch_run_attempt="$(jq -r \
-            '.dispatch_run_attempt // empty' <<< "$PAYLOAD")"
-          dispatch_id="$(jq -r '.dispatch_id // empty' <<< "$PAYLOAD")"
-          source_sha="$(jq -r '.source_sha // empty' <<< "$PAYLOAD")"
-          public_source_sha="$(jq -r '.public_source_sha // empty' <<< "$PAYLOAD")"
-          distribution_sha="$(jq -r '.distribution_sha // empty' <<< "$PAYLOAD")"
-          tag="$(jq -r '.tag // empty' <<< "$PAYLOAD")"
-          version="$(jq -r '.version // empty' <<< "$PAYLOAD")"
-          flatpak_commit="$(jq -r '.flatpak_commit // empty' <<< "$PAYLOAD")"
-          rollback_commit="$(jq -r '.rollback_commit // empty' <<< "$PAYLOAD")"
-          if [[ "$operation" != release \
-                || ! "$source_run_id" =~ ^[1-9][0-9]*$ \
-                || ! "$dispatch_run_id" =~ ^[1-9][0-9]*$ \
-                || ! "$dispatch_run_attempt" =~ ^[1-9][0-9]*$ \
-                || "$dispatch_id" \
-                    != "$dispatch_run_id-$dispatch_run_attempt-release" \
-                || ! "$source_sha" =~ ^[0-9a-f]{40}$ \
-                || ! "$public_source_sha" =~ ^[0-9a-f]{40}$ \
-                || ! "$distribution_sha" =~ ^[0-9a-f]{40}$ \
-                || ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
-                || "v$version" != "$tag" \
-                || ! "$flatpak_commit" =~ ^[0-9a-f]{64}$ \
-                || ! "$rollback_commit" =~ ^(none|[0-9a-f]{64})$ ]]; then
+          if [[ "$OPERATION" != release \
+                || ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ \
+                || ! "$DISPATCH_RUN_ID" =~ ^[1-9][0-9]*$ \
+                || ! "$DISPATCH_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ \
+                || "$DISPATCH_ID" \
+                    != "$DISPATCH_RUN_ID-$DISPATCH_RUN_ATTEMPT-release" \
+                || ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$PUBLIC_SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$DISTRIBUTION_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$RELEASE_TAG" \
+                    =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
+                || "v$RELEASE_VERSION" != "$RELEASE_TAG" \
+                || ! "$EXPECTED_FLATPAK_COMMIT" =~ ^[0-9a-f]{64}$ \
+                || ! "$EXPECTED_ROLLBACK_COMMIT" \
+                    =~ ^(none|[0-9a-f]{64})$ ]]; then
             echo "Invalid public release dispatch payload" >&2
             exit 64
           fi
@@ -78,7 +103,7 @@ jobs:
       - name: Checkout protected public distribution verifiers
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.client_payload.distribution_sha }}
+          ref: ${{ env.DISTRIBUTION_SHA }}
           submodules: false
           fetch-depth: 1
           persist-credentials: false
@@ -105,14 +130,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
-          SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
-          PUBLIC_SOURCE_SHA: ${{ github.event.client_payload.public_source_sha }}
-          DISTRIBUTION_SHA: ${{ github.event.client_payload.distribution_sha }}
-          RELEASE_TAG: ${{ github.event.client_payload.tag }}
-          RELEASE_VERSION: ${{ github.event.client_payload.version }}
-          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
-          EXPECTED_ROLLBACK_COMMIT: ${{ github.event.client_payload.rollback_commit }}
         run: |
           set -Eeuo pipefail
           # shellcheck disable=SC2153
@@ -321,8 +338,6 @@ jobs:
 
       - name: Install and smoke-test the signed candidate locally
         shell: bash
-        env:
-          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
         run: |
           set -Eeuo pipefail
           state_root="$(mktemp -d)"
@@ -388,7 +403,6 @@ jobs:
               || steps.state.outputs.mode == 'reconciled' }}
         shell: bash
         env:
-          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
           FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
         run: |
           set -Eeuo pipefail
@@ -419,8 +433,6 @@ jobs:
           ${{ steps.state.outputs.mode == 'deploy'
               || steps.state.outputs.mode == 'reconciled' }}
         shell: bash
-        env:
-          EXPECTED_FLATPAK_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
         run: |
           set -Eeuo pipefail
           state_root="$(mktemp -d)"
@@ -485,7 +497,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.client_payload.tag }}
         run: |
           set -Eeuo pipefail
           echo "state=pre-mutation" >> "$GITHUB_OUTPUT"
@@ -549,7 +560,6 @@ jobs:
         if: ${{ failure() && steps.rollback-deployment.outcome == 'success' }}
         shell: bash
         env:
-          EXPECTED_ROLLBACK_COMMIT: ${{ github.event.client_payload.rollback_commit }}
           FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
         run: |
           set -Eeuo pipefail
