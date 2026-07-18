@@ -30,13 +30,13 @@ flatpak run io.github.dxvsi.megawhisper
 
 The files under `flatpak/*.in` in a source checkout are release-pipeline templates with unresolved repository URL and GPG key placeholders. They cannot be opened, installed, or made valid by renaming. Use the signed `.flatpakref` from a GitHub Release.
 
-The public `main` branch contains the protected distribution workflow and verification files. Complete source snapshots are published as orphan release tags and signed source archives. To build the exact v2.0.0 source tag for the current user, run:
+The public `main` branch contains the protected distribution workflow and verification files. Complete source snapshots are published as orphan release tags and signed source archives. To build the exact v2.0.1 source tag for the current user, run:
 
 ```fish
 git clone https://github.com/DXVSI/MegaWhisper.git
 cd MegaWhisper
-git checkout v2.0.0
-scripts/install-local-flatpak.sh 2.0.0
+git checkout v2.0.1
+scripts/install-local-flatpak.sh 2.0.1
 flatpak run io.github.dxvsi.megawhisper.Devel
 ```
 
@@ -45,10 +45,10 @@ The installer uses an isolated temporary Flatpak build environment and the separ
 After publication, the release also provides a portable AppImage:
 
 ```fish
-chmod +x ./MegaWhisper-2.0.0-x86_64.AppImage
-./MegaWhisper-2.0.0-x86_64.AppImage --install-desktop-integration
-./MegaWhisper-2.0.0-x86_64.AppImage --check-desktop-integration
-./MegaWhisper-2.0.0-x86_64.AppImage
+chmod +x ./MegaWhisper-2.0.1-x86_64.AppImage
+./MegaWhisper-2.0.1-x86_64.AppImage --install-desktop-integration
+./MegaWhisper-2.0.1-x86_64.AppImage --check-desktop-integration
+./MegaWhisper-2.0.1-x86_64.AppImage
 ```
 
 Portable startup and button-driven operation work without installation. Global Shortcuts and system insertion require the explicit per-user desktop integration above. Reinstall it after moving the AppImage because the exact path is verified. `--remove-desktop-integration` removes only files owned by this AppImage integration.
@@ -67,13 +67,13 @@ The provisional local default is the Balanced `whisper-large-v3-turbo-q5_0` prof
 
 ## Build and verification
 
-The project uses Qt 6 Widgets, qmake, Qt Multimedia, `whisper.cpp`, SQLite, FLAC, libsamplerate, `libei`, and libxkbcommon. History playback decodes FLAC off the GUI thread, converts canonical PCM to the selected output format, and streams it through `QAudioSink`; stop, replay, device loss, and shutdown do not retain a `GstPlay` worker. The Flatpak ships a full app-local Qt Multimedia 6.11.1 module with the exact upstream QTBUG-147011 fix until the KDE runtime publishes Qt 6.11.2 or newer. Production uses the sandboxed PulseAudio compatibility socket, which is provided by PipeWire Pulse on common modern desktops. CI separately exercises active `QAudioSource` and `QAudioSink` teardown through both that compatibility backend and a temporary direct PipeWire connection, without granting direct PipeWire access to the installed application. CI builds CPU and Vulkan native variants, Flatpak, and an openSUSE-baseline AppImage. Releases include signatures, checksums, SPDX SBOMs, a signed build-provenance document, a public orphan source snapshot without private history, expanded `whisper.cpp` sources, AppImage runtime sources, Qt Multimedia corresponding source, and signed Pages recovery states. The public workflow verifies the candidate website and Flatpak repository locally, including a clean install and smoke test, then publishes one complete Pages tree containing the site and exactly one OSTree state. It verifies the live HTTPS bytes and signed `.flatpakref` before publishing the draft Release. A failed post-deployment check restores the complete previous signed Pages state; the first-release fallback exposes a signed empty repository and disables the install action.
+The project uses Qt 6 Widgets, qmake, Qt Multimedia, `whisper.cpp`, SQLite, FLAC, libsamplerate, `libei`, and libxkbcommon. History playback decodes FLAC off the GUI thread, converts canonical PCM to the selected output format, and streams it through `QAudioSink`; stop, replay, device loss, and shutdown do not retain a `GstPlay` worker. The Flatpak ships a full app-local Qt Multimedia 6.11.1 module with exact upstream backports for QTBUG-147011 and the PipeWire core-hook race fixed by commit `4ee738562`, until the KDE runtime publishes Qt 6.11.2 or newer. Production uses the sandboxed PulseAudio compatibility socket, which is provided by PipeWire Pulse on common modern desktops. CI separately exercises active `QAudioSource` and `QAudioSink` teardown through that compatibility backend and 25 independent temporary direct PipeWire processes, without granting direct PipeWire access to the installed application. CI builds CPU and Vulkan native variants, Flatpak, and an openSUSE-baseline AppImage. A `v2.0.1` release has exactly 11 uploaded assets: installers and repository descriptors remain directly visible, while SBOMs, provenance, notices, corresponding sources, and signed Pages recovery states are grouped into deterministic compliance and recovery bundles. One signed `SHA256SUMS` authenticates all payload assets. The public workflow verifies the candidate website and Flatpak repository locally, including a clean install and smoke test, then publishes one complete Pages tree containing the site and exactly one OSTree state. It verifies the live HTTPS bytes and signed `.flatpakref` before publishing the draft Release. A failed post-deployment check restores the complete previous signed Pages state; the first-release fallback exposes a signed empty repository and disables the install action.
 
 ```fish
-git checkout v2.0.0
+git checkout v2.0.1
 git submodule update --init --recursive
 set -x SOURCE_DATE_EPOCH (git log -1 --format=%ct)
-scripts/ci/build-native.sh 2.0.0 1 development
+scripts/ci/build-native.sh 2.0.1 1 development
 env QT_QPA_PLATFORM=offscreen ./run-megawhisper.sh --smoke-test
 env QT_QPA_PLATFORM=offscreen ./run-megawhisper.sh --ui-smoke-test
 scripts/install-development-desktop.sh install
