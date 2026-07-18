@@ -66,6 +66,15 @@ jobs:
       RELEASE_VERSION: >-
         ${{ github.event.client_payload.release_payload.version
             || github.event.client_payload.version }}
+      ASSET_SCHEMA: >-
+        ${{ github.event.client_payload.release_payload.asset_schema
+            || github.event.client_payload.asset_schema }}
+      RELEASE_ID: >-
+        ${{ github.event.client_payload.release_payload.release_id
+            || github.event.client_payload.release_id }}
+      ASSET_INVENTORY: >-
+        ${{ toJSON(github.event.client_payload.release_payload.assets
+            || github.event.client_payload.assets) }}
       EXPECTED_FLATPAK_COMMIT: >-
         ${{ github.event.client_payload.release_payload.flatpak_commit
             || github.event.client_payload.flatpak_commit }}
@@ -98,6 +107,22 @@ jobs:
           if [[ "$GITHUB_REPOSITORY" != DXVSI/MegaWhisper ]]; then
             echo "Public distribution workflow is running in an unexpected repository" >&2
             exit 65
+          fi
+          if [[ "$RELEASE_VERSION" == 2.0.0 \
+                && ( -z "$ASSET_SCHEMA" || "$ASSET_SCHEMA" == legacy-v1 ) ]]; then
+            echo "ASSET_SCHEMA=legacy-v1" >> "$GITHUB_ENV"
+          else
+            IFS=. read -r version_major version_minor version_patch \
+              <<< "$RELEASE_VERSION"
+            if [[ "$ASSET_SCHEMA" != bundle-v1 \
+                  || ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+                  || "$ASSET_INVENTORY" == null ]] \
+                || (( 10#$version_major < 2 \
+                      || (10#$version_major == 2 && 10#$version_minor == 0 \
+                          && 10#$version_patch < 1) )); then
+              echo "Unsupported release asset schema/version pair" >&2
+              exit 64
+            fi
           fi
 
       - name: Checkout protected public distribution verifiers
@@ -145,6 +170,7 @@ jobs:
             echo "Dispatched public distribution source is not in main" >&2
             exit 65
           fi
+          # shellcheck disable=SC2153
           git fetch --force --no-tags origin \
             "+refs/tags/$RELEASE_TAG:refs/ci/public-source"
           public_tag_sha="$(git rev-parse 'refs/ci/public-source^{commit}')"
@@ -184,14 +210,20 @@ jobs:
             done
             return 1
           }
-          releases_json="$(fetch_release_list)" || {
-            echo "Public release list remained unavailable" >&2
-            exit 69
-          }
-          release_json="$(jq -c --arg tag "$RELEASE_TAG" \
-            '[.[] | select(.tag_name == $tag)]
-             | if length == 1 then .[0] else empty end' \
-            <<< "$releases_json")"
+          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
+            # shellcheck disable=SC2153
+            release_json="$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          else
+            releases_json="$(fetch_release_list)" || {
+              echo "Public release list remained unavailable" >&2
+              exit 69
+            }
+            release_json="$(jq -c --arg tag "$RELEASE_TAG" \
+              '[.[] | select(.tag_name == $tag)]
+               | if length == 1 then .[0] else empty end' \
+              <<< "$releases_json")"
+          fi
           if [[ -z "$release_json" ]]; then
             echo "Public release list did not return one exact release" >&2
             exit 65
@@ -210,9 +242,52 @@ jobs:
           release_tag="$(jq -r '.tag_name // empty' <<< "$release_json")"
           if [[ "$is_prerelease" != false || "$release_tag" != "$RELEASE_TAG" \
                 || ! "$release_id" =~ ^[1-9][0-9]*$ \
+                || ( "$ASSET_SCHEMA" == bundle-v1 \
+                     && "$release_id" != "$RELEASE_ID" ) \
                 || ( "$is_draft" != true && "$is_draft" != false ) ]]; then
             echo "Public release has an invalid identity or state" >&2
             exit 65
+          fi
+
+          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
+            release_list_mode=legacy-release
+          else
+            release_list_mode=release
+          fi
+          expected_assets="$(scripts/ci/list-release-assets.sh \
+            "$RELEASE_VERSION" "$release_list_mode")"
+          api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
+            | LC_ALL=C sort)"
+          api_asset_inventory="$(jq -c '
+            [.assets[]
+              | {
+                  id: .id,
+                  name: .name,
+                  size: .size,
+                  digest: .digest
+                }
+            ] | sort_by(.name)' <<< "$release_json")"
+          if [[ "$api_asset_names" != "$expected_assets" ]]; then
+            echo "Public release API inventory does not match $ASSET_SCHEMA" >&2
+            exit 65
+          fi
+          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
+            dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+              <<< "$ASSET_INVENTORY")"
+            if [[ "$dispatched_asset_inventory" != "$api_asset_inventory" ]] \
+                || ! jq -e '
+                  length == 11
+                  and all(.[];
+                    (.id | type) == "number" and .id > 0
+                    and (.name | type) == "string"
+                    and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
+                    and (.size | type) == "number" and .size > 0
+                    and (.digest | type) == "string"
+                    and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+                  <<< "$dispatched_asset_inventory" >/dev/null; then
+              echo "Public release API inventory differs from dispatch" >&2
+              exit 65
+            fi
           fi
 
           mkdir -p release-assets
@@ -259,9 +334,6 @@ jobs:
               | [.id, .name, .state, .size, .digest]
               | @tsv' <<< "$release_json"
           )
-          scripts/ci/verify-release-signatures.sh release-assets
-          expected_assets="$(scripts/ci/list-release-assets.sh \
-            "$RELEASE_VERSION" release)"
           actual_assets="$(find release-assets -maxdepth 1 -type f \
             -printf '%f\n' | LC_ALL=C sort)"
           if [[ "$actual_assets" != "$expected_assets" ]]; then
@@ -273,19 +345,42 @@ jobs:
 
           fingerprint="$(tr -d '[:space:]' < RELEASE_KEY_FINGERPRINT \
             | tr '[:lower:]' '[:upper:]')"
-          key_fingerprint="$(gpg --batch --with-colons --show-keys \
-            release-assets/megawhisper-release-key.asc \
-            | awk -F: '$1 == "pub" { primary=1; next }
-                $1 == "fpr" && primary { print toupper($10); exit }')"
-          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ \
-                || "$key_fingerprint" != "$fingerprint" ]]; then
-            echo "Public release key does not match the pinned fingerprint" >&2
+          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
+            echo "Pinned release fingerprint has an invalid format" >&2
             exit 65
           fi
+          scripts/ci/verify-release-signatures.sh \
+            release-assets "$RELEASE_VERSION" "$ASSET_SCHEMA" "$fingerprint"
 
-          recovery_metadata=release-assets/flatpak-pages-recovery.txt
+          recovery_root=recovery-assets
+          mkdir -p "$recovery_root"
+          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
+            scripts/ci/release-bundles.sh extract recovery \
+              "$RELEASE_VERSION" \
+              "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
+              "$recovery_root"
+          else
+            for file_name in \
+              MegaWhisper-flatpak-repo.tar.zst \
+              MegaWhisper-flatpak-repo.tar.zst.asc \
+              MegaWhisper-flatpak-rollback-repo.tar.zst \
+              MegaWhisper-flatpak-rollback-repo.tar.zst.asc \
+              MegaWhisper-pages-site.tar.zst \
+              MegaWhisper-pages-site.tar.zst.asc \
+              MegaWhisper-pages-rollback-site.tar.zst \
+              MegaWhisper-pages-rollback-site.tar.zst.asc \
+              flatpak-pages-recovery.txt \
+              flatpak-pages-recovery.txt.asc \
+              megawhisper-release-key.asc; do
+              install -m 0600 \
+                "release-assets/$file_name" "$recovery_root/$file_name"
+            done
+          fi
+          recovery_metadata="$recovery_root/flatpak-pages-recovery.txt"
           metadata_format="$(awk -F= '$1 == "format" { print $2 }' \
             "$recovery_metadata")"
+          metadata_asset_schema="$(awk -F= \
+            '$1 == "asset_schema" { print $2 }' "$recovery_metadata")"
           metadata_run_id="$(awk -F= '$1 == "source_run_id" { print $2 }' \
             "$recovery_metadata")"
           metadata_source="$(awk -F= '$1 == "source_sha" { print $2 }' \
@@ -313,7 +408,21 @@ jobs:
           rollback_site_archive_sha="$(awk -F= \
             '$1 == "rollback_site_archive_sha256" { print $2 }' \
             "$recovery_metadata")"
-          if [[ "$metadata_format" != 3 \
+          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
+            metadata_schema_valid=false
+            if [[ "$metadata_format" == 3 \
+                  && -z "$metadata_asset_schema" \
+                  && "$metadata_version" == 2.0.0 ]]; then
+              metadata_schema_valid=true
+            fi
+          else
+            metadata_schema_valid=false
+            if [[ "$metadata_format" == 4 \
+                  && "$metadata_asset_schema" == bundle-v1 ]]; then
+              metadata_schema_valid=true
+            fi
+          fi
+          if [[ "$metadata_schema_valid" != true \
                 || "$metadata_run_id" != "$SOURCE_RUN_ID" \
                 || "$metadata_source" != "$SOURCE_SHA" \
                 || "$metadata_public_source" != "$PUBLIC_SOURCE_SHA" \
@@ -331,33 +440,24 @@ jobs:
           fi
 
           scripts/ci/verify-pages-recovery.sh \
-            release-assets candidate-repo candidate-site \
+            "$recovery_root" candidate-repo candidate-site \
             "$fingerprint" "$SOURCE_RUN_ID" strict
           install -m 0644 "$recovery_metadata" \
             candidate-repo/flatpak-active-state.txt
           install -m 0644 "$recovery_metadata.asc" \
             candidate-repo/flatpak-active-state.txt.asc
-          install -m 0644 release-assets/megawhisper-release-key.asc \
+          install -m 0644 "$recovery_root/megawhisper-release-key.asc" \
             candidate-repo/megawhisper-release-key.asc
 
-          rollback_archive=release-assets/MegaWhisper-flatpak-rollback-repo.tar.zst
+          rollback_archive="$recovery_root/MegaWhisper-flatpak-rollback-repo.tar.zst"
           actual_rollback_archive_sha="$(sha256sum "$rollback_archive" \
             | awk '{print $1}')"
           if [[ "$actual_rollback_archive_sha" != "$rollback_archive_sha" ]]; then
             echo "Rollback archive differs from signed deployment metadata" >&2
             exit 65
           fi
-          mkdir -p rollback-repo
-          while IFS= read -r entry; do
-            case "$entry" in
-              /*|..|../*|*/../*)
-                echo "Unsafe path in rollback repository archive: $entry" >&2
-                exit 65
-                ;;
-            esac
-          done < <(tar --zstd -tf "$rollback_archive")
-          tar --zstd -xf "$rollback_archive" \
-            -C rollback-repo --no-same-owner --no-same-permissions
+          scripts/ci/extract-recovery-archive.sh \
+            "$rollback_archive" rollback-repo
           ostree fsck --repo=rollback-repo
           rollback_ref="$(ostree rev-parse --repo=rollback-repo \
             app/io.github.dxvsi.megawhisper/x86_64/stable 2>/dev/null || true)"
@@ -371,7 +471,7 @@ jobs:
             exit 65
           fi
 
-          rollback_site_archive=release-assets/MegaWhisper-pages-rollback-site.tar.zst
+          rollback_site_archive="$recovery_root/MegaWhisper-pages-rollback-site.tar.zst"
           actual_rollback_site_archive_sha="$(sha256sum \
             "$rollback_site_archive" | awk '{print $1}')"
           if [[ "$actual_rollback_site_archive_sha" \
@@ -379,17 +479,8 @@ jobs:
             echo "Rollback site archive differs from signed metadata" >&2
             exit 65
           fi
-          mkdir -p rollback-site
-          while IFS= read -r entry; do
-            case "$entry" in
-              /*|..|../*|*/../*)
-                echo "Unsafe path in rollback site archive: $entry" >&2
-                exit 65
-                ;;
-            esac
-          done < <(tar --zstd -tf "$rollback_site_archive")
-          tar --zstd -xf "$rollback_site_archive" \
-            -C rollback-site --no-same-owner --no-same-permissions
+          scripts/ci/extract-recovery-archive.sh \
+            "$rollback_site_archive" rollback-site
           scripts/ci/verify-pages-site.sh rollback-site rollback manifest
 
           scripts/ci/assemble-pages-state.sh \
@@ -398,14 +489,16 @@ jobs:
           scripts/ci/assemble-pages-state.sh \
             rollback-site rollback-repo rollback-pages \
             "$EXPECTED_ROLLBACK_COMMIT" rollback
-          if [[ "$is_draft" == true ]]; then
-            echo "mode=deploy" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=reconciled" >> "$GITHUB_OUTPUT"
-          fi
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
-          echo "site_source_sha=$metadata_site_source" >> "$GITHUB_OUTPUT"
+          {
+            if [[ "$is_draft" == true ]]; then
+              echo "mode=deploy"
+            else
+              echo "mode=reconciled"
+            fi
+            echo "release_id=$release_id"
+            echo "fingerprint=$fingerprint"
+            echo "site_source_sha=$metadata_site_source"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install and smoke-test the signed candidate locally
         shell: bash
@@ -572,6 +665,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "state=pre-mutation" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2153
           release_id="$RELEASE_ID"
           if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
             echo "Public release ID is invalid" >&2
@@ -610,6 +704,36 @@ jobs:
               <<< "$release_json" >/dev/null; then
             echo "Public release returned invalid state types" >&2
             exit 65
+          fi
+          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
+            current_asset_inventory="$(jq -c '
+              [.assets[]
+                | {
+                    id: .id,
+                    name: .name,
+                    size: .size,
+                    digest: .digest
+                  }
+              ] | sort_by(.name)' <<< "$release_json")"
+            dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+              <<< "$ASSET_INVENTORY")"
+            if [[ "$current_asset_inventory" \
+                    != "$dispatched_asset_inventory" ]] \
+                || ! jq -e '
+                  (.assets | length) == 11
+                  and ([.assets[].name] | unique | length) == 11
+                  and all(.assets[];
+                    .state == "uploaded"
+                    and (.id | type) == "number" and .id > 0
+                    and (.name | type) == "string"
+                    and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
+                    and (.size | type) == "number" and .size > 0
+                    and (.digest | type) == "string"
+                    and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+                  <<< "$release_json" >/dev/null; then
+              echo "Public release assets changed after verification" >&2
+              exit 65
+            fi
           fi
           current_draft="$(jq -r '.draft' <<< "$release_json")"
           target_commitish="$(jq -r '.target_commitish // empty' \
@@ -738,6 +862,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPERATION: ${{ github.event.client_payload.operation }}
           RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_VERSION: ${{ github.event.client_payload.version }}
+          ASSET_SCHEMA: ${{ github.event.client_payload.asset_schema }}
+          RELEASE_ID: ${{ github.event.client_payload.release_id }}
+          ASSET_INVENTORY: ${{ toJSON(github.event.client_payload.assets) }}
           DISPATCH_RUN_ID: ${{ github.event.client_payload.dispatch_run_id }}
           DISPATCH_RUN_ATTEMPT: ${{ github.event.client_payload.dispatch_run_attempt }}
           DISPATCH_ID: ${{ github.event.client_payload.dispatch_id }}
@@ -748,16 +876,36 @@ jobs:
           set -Eeuo pipefail
           # shellcheck disable=SC2153
           if [[ "$OPERATION" != restore && "$OPERATION" != rollback \
-                || ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
+                || ! "$RELEASE_TAG" \
+                    =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
+                || "v$RELEASE_VERSION" != "$RELEASE_TAG" \
                 || ! "$DISPATCH_RUN_ID" =~ ^[1-9][0-9]*$ \
                 || ! "$DISPATCH_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ \
                 || "$DISPATCH_ID" \
                     != "$DISPATCH_RUN_ID-$DISPATCH_RUN_ATTEMPT-recovery" \
                 || ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ \
                 || ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+                || "$ASSET_INVENTORY" == null \
                 || ! "$EXPECTED_COMMIT" =~ ^(none|[0-9a-f]{64})$ ]]; then
             echo "Invalid recovery dispatch payload" >&2
             exit 64
+          fi
+          if [[ "$RELEASE_VERSION" == 2.0.0 ]]; then
+            if [[ "$ASSET_SCHEMA" != legacy-v1 ]]; then
+              echo "v2.0.0 recovery requires legacy-v1" >&2
+              exit 64
+            fi
+          else
+            IFS=. read -r version_major version_minor version_patch \
+              <<< "$RELEASE_VERSION"
+            if [[ "$ASSET_SCHEMA" != bundle-v1 ]] \
+                || (( 10#$version_major < 2 \
+                      || (10#$version_major == 2 && 10#$version_minor == 0 \
+                          && 10#$version_patch < 1) )); then
+              echo "Unsupported recovery asset schema/version pair" >&2
+              exit 64
+            fi
           fi
           git fetch --force --no-tags origin \
             "+refs/tags/$RELEASE_TAG:refs/ci/recovery-source"
@@ -785,13 +933,14 @@ jobs:
             exit 65
           fi
 
-          release_state="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,isPrerelease,tagName \
-            --jq '[.isDraft, .isPrerelease, .tagName] | @tsv')"
-          IFS=$'\t' read -r is_draft is_prerelease release_tag \
-            <<< "$release_state"
-          if [[ "$release_tag" != "$RELEASE_TAG" \
+          release_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          release_id="$(jq -r '.id // empty' <<< "$release_json")"
+          is_draft="$(jq -r '.draft' <<< "$release_json")"
+          is_prerelease="$(jq -r '.prerelease' <<< "$release_json")"
+          release_tag="$(jq -r '.tag_name // empty' <<< "$release_json")"
+          if [[ "$release_id" != "$RELEASE_ID" \
+                || "$release_tag" != "$RELEASE_TAG" \
                 || "$is_prerelease" != false \
                 || ( "$is_draft" != true && "$is_draft" != false ) \
                 || ( "$OPERATION" == restore && "$is_draft" != false ) ]]; then
@@ -799,11 +948,79 @@ jobs:
             exit 65
           fi
 
-          mkdir -p release-assets
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" --dir release-assets
+          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
+            release_list_mode=legacy-release
+          else
+            release_list_mode=release
+          fi
           expected_assets="$(scripts/ci/list-release-assets.sh \
-            "$graph_version" release)"
+            "$RELEASE_VERSION" "$release_list_mode")"
+          api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
+            | LC_ALL=C sort)"
+          api_asset_inventory="$(jq -c '
+            [.assets[]
+              | {
+                  id: .id,
+                  name: .name,
+                  size: .size,
+                  digest: .digest
+                }
+            ] | sort_by(.name)' <<< "$release_json")"
+          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+            <<< "$ASSET_INVENTORY")"
+          expected_asset_count="$(wc -l <<< "$expected_assets")"
+          if [[ "$api_asset_names" != "$expected_assets" \
+                || "$api_asset_inventory" != "$dispatched_asset_inventory" ]] \
+              || ! jq -e --argjson expected_count "$expected_asset_count" '
+                length == $expected_count
+                and all(.[];
+                  (.id | type) == "number" and .id > 0
+                  and (.name | type) == "string"
+                  and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
+                  and (.size | type) == "number" and .size > 0
+                  and (.digest | type) == "string"
+                  and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+                <<< "$dispatched_asset_inventory" >/dev/null; then
+            echo "Recovery release API inventory differs from dispatch" >&2
+            exit 65
+          fi
+
+          mkdir -p release-assets
+          while IFS=$'\t' read -r asset_id asset_name asset_state asset_size \
+              asset_digest; do
+            if [[ ! "$asset_id" =~ ^[1-9][0-9]*$ \
+                  || ! "$asset_name" \
+                      =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ \
+                  || "$asset_state" != uploaded \
+                  || ! "$asset_size" =~ ^[1-9][0-9]*$ \
+                  || ! "$asset_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Recovery release contains an invalid asset entry" >&2
+              exit 65
+            fi
+            asset_path="release-assets/$asset_name"
+            asset_downloaded=0
+            for attempt in 1 2 3; do
+              echo "Downloading $asset_name, attempt $attempt of 3"
+              rm -f "$asset_path"
+              if gh api --header 'Accept: application/octet-stream' \
+                    "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+                    > "$asset_path" \
+                  && [[ "$(stat -c '%s' "$asset_path")" == "$asset_size" ]] \
+                  && [[ "sha256:$(sha256sum "$asset_path" \
+                        | awk '{print $1}')" == "$asset_digest" ]]; then
+                asset_downloaded=1
+                break
+              fi
+            done
+            if [[ "$asset_downloaded" -ne 1 ]]; then
+              echo "Recovery release asset remained unavailable: $asset_name" >&2
+              exit 69
+            fi
+          done < <(
+            jq -r '.assets[]
+              | [.id, .name, .state, .size, .digest]
+              | @tsv' <<< "$release_json"
+          )
           actual_assets="$(find release-assets -maxdepth 1 -type f \
             -printf '%f\n' | LC_ALL=C sort)"
           if [[ "$actual_assets" != "$expected_assets" ]]; then
@@ -812,20 +1029,40 @@ jobs:
               <(printf '%s\n' "$actual_assets") || true
             exit 65
           fi
-          scripts/ci/verify-release-signatures.sh release-assets
           fingerprint="$(tr -d '[:space:]' < RELEASE_KEY_FINGERPRINT \
             | tr '[:lower:]' '[:upper:]')"
-          key_fingerprint="$(gpg --batch --with-colons --show-keys \
-            release-assets/megawhisper-release-key.asc \
-            | awk -F: '$1 == "pub" { primary=1; next }
-                $1 == "fpr" && primary { print toupper($10); exit }')"
-          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ \
-                || "$key_fingerprint" != "$fingerprint" ]]; then
-            echo "Recovery release key does not match the pinned fingerprint" >&2
+          if [[ ! "$fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
+            echo "Pinned recovery fingerprint has an invalid format" >&2
             exit 65
           fi
+          scripts/ci/verify-release-signatures.sh \
+            release-assets "$RELEASE_VERSION" "$ASSET_SCHEMA" "$fingerprint"
 
-          metadata_file=release-assets/flatpak-pages-recovery.txt
+          recovery_root=recovery-assets
+          mkdir -p "$recovery_root"
+          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
+            scripts/ci/release-bundles.sh extract recovery \
+              "$RELEASE_VERSION" \
+              "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
+              "$recovery_root"
+          else
+            for file_name in \
+              MegaWhisper-flatpak-repo.tar.zst \
+              MegaWhisper-flatpak-repo.tar.zst.asc \
+              MegaWhisper-flatpak-rollback-repo.tar.zst \
+              MegaWhisper-flatpak-rollback-repo.tar.zst.asc \
+              MegaWhisper-pages-site.tar.zst \
+              MegaWhisper-pages-site.tar.zst.asc \
+              MegaWhisper-pages-rollback-site.tar.zst \
+              MegaWhisper-pages-rollback-site.tar.zst.asc \
+              flatpak-pages-recovery.txt \
+              flatpak-pages-recovery.txt.asc \
+              megawhisper-release-key.asc; do
+              install -m 0600 \
+                "release-assets/$file_name" "$recovery_root/$file_name"
+            done
+          fi
+          metadata_file="$recovery_root/flatpak-pages-recovery.txt"
           declare -A metadata=()
           while IFS='=' read -r key value; do
             if [[ -z "$key" || -z "$value" \
@@ -834,7 +1071,7 @@ jobs:
               exit 65
             fi
             case "$key" in
-              format|source_run_id|source_sha|public_source_sha|\
+              format|asset_schema|source_run_id|source_sha|public_source_sha|\
               release_repository|version|flatpak_commit|archive_sha256|\
               site_source_sha|site_archive_sha256|rollback_commit|\
               rollback_archive_sha256|rollback_site_source_sha|\
@@ -857,7 +1094,21 @@ jobs:
               exit 65
             fi
           done
-          if [[ "${metadata[format]}" != 3 \
+          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
+            metadata_schema_valid=false
+            if [[ "${metadata[format]}" == 3 \
+                  && -z "${metadata[asset_schema]+present}" \
+                  && "${metadata[version]}" == 2.0.0 ]]; then
+              metadata_schema_valid=true
+            fi
+          else
+            metadata_schema_valid=false
+            if [[ "${metadata[format]}" == 4 \
+                  && "${metadata[asset_schema]-}" == bundle-v1 ]]; then
+              metadata_schema_valid=true
+            fi
+          fi
+          if [[ "$metadata_schema_valid" != true \
                 || "${metadata[source_run_id]}" != "$SOURCE_RUN_ID" \
                 || "${metadata[source_sha]}" != "$SOURCE_SHA" \
                 || "${metadata[public_source_sha]}" != "$public_source_sha" \
@@ -885,13 +1136,13 @@ jobs:
               exit 65
             fi
             scripts/ci/verify-pages-recovery.sh \
-              release-assets recovery-repo recovery-site \
+              "$recovery_root" recovery-repo recovery-site \
               "$fingerprint" "$SOURCE_RUN_ID" manifest
-            install -m 0644 release-assets/flatpak-pages-recovery.txt \
+            install -m 0644 "$recovery_root/flatpak-pages-recovery.txt" \
               recovery-repo/flatpak-active-state.txt
-            install -m 0644 release-assets/flatpak-pages-recovery.txt.asc \
+            install -m 0644 "$recovery_root/flatpak-pages-recovery.txt.asc" \
               recovery-repo/flatpak-active-state.txt.asc
-            install -m 0644 release-assets/megawhisper-release-key.asc \
+            install -m 0644 "$recovery_root/megawhisper-release-key.asc" \
               recovery-repo/megawhisper-release-key.asc
             recovery_mode=release
           else
@@ -899,24 +1150,15 @@ jobs:
               echo "Requested rollback commit differs from signed metadata" >&2
               exit 65
             fi
-            archive=release-assets/MegaWhisper-flatpak-rollback-repo.tar.zst
+            archive="$recovery_root/MegaWhisper-flatpak-rollback-repo.tar.zst"
             archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
             if [[ "$archive_sha256" \
                   != "${metadata[rollback_archive_sha256]}" ]]; then
               echo "Rollback archive differs from signed metadata" >&2
               exit 65
             fi
-            mkdir -p recovery-repo
-            while IFS= read -r entry; do
-              case "$entry" in
-                /*|..|../*|*/../*)
-                  echo "Unsafe path in rollback archive: $entry" >&2
-                  exit 65
-                  ;;
-              esac
-            done < <(tar --zstd -tf "$archive")
-            tar --zstd -xf "$archive" \
-              -C recovery-repo --no-same-owner --no-same-permissions
+            scripts/ci/extract-recovery-archive.sh \
+              "$archive" recovery-repo
             ostree fsck --repo=recovery-repo
             rollback_ref="$(ostree rev-parse --repo=recovery-repo \
               app/io.github.dxvsi.megawhisper/x86_64/stable \
@@ -943,7 +1185,7 @@ jobs:
             install -d -m 0700 "$HOME" "$XDG_DATA_HOME" \
               "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
             flatpak remote-add --user \
-              --gpg-import=release-assets/megawhisper-release-key.asc \
+              --gpg-import="$recovery_root/megawhisper-release-key.asc" \
               recovery-local "file://$GITHUB_WORKSPACE/recovery-repo"
             if [[ "$EXPECTED_COMMIT" == none ]]; then
               remote_refs="$(flatpak remote-ls --user --columns=ref \
@@ -960,7 +1202,7 @@ jobs:
                 exit 65
               fi
             fi
-            site_archive=release-assets/MegaWhisper-pages-rollback-site.tar.zst
+            site_archive="$recovery_root/MegaWhisper-pages-rollback-site.tar.zst"
             site_archive_sha256="$(sha256sum "$site_archive" \
               | awk '{print $1}')"
             if [[ "$site_archive_sha256" \
@@ -968,17 +1210,8 @@ jobs:
               echo "Rollback site archive differs from signed metadata" >&2
               exit 65
             fi
-            mkdir -p recovery-site
-            while IFS= read -r entry; do
-              case "$entry" in
-                /*|..|../*|*/../*)
-                  echo "Unsafe path in rollback site archive: $entry" >&2
-                  exit 65
-                  ;;
-              esac
-            done < <(tar --zstd -tf "$site_archive")
-            tar --zstd -xf "$site_archive" \
-              -C recovery-site --no-same-owner --no-same-permissions
+            scripts/ci/extract-recovery-archive.sh \
+              "$site_archive" recovery-site
             scripts/ci/verify-pages-site.sh \
               recovery-site rollback manifest
             recovery_mode=rollback

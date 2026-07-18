@@ -15,8 +15,19 @@ readonly site_validation_mode="$6"
 readonly recovery_dir repo_dir site_dir
 readonly archive_name="MegaWhisper-flatpak-repo.tar.zst"
 readonly site_archive_name="MegaWhisper-pages-site.tar.zst"
+readonly rollback_archive_name="MegaWhisper-flatpak-rollback-repo.tar.zst"
+readonly rollback_site_archive_name="MegaWhisper-pages-rollback-site.tar.zst"
 readonly metadata_name="flatpak-pages-recovery.txt"
 readonly key_name="megawhisper-release-key.asc"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly script_dir
+for command_name in awk chmod diff find flatpak gpg gpgconf install mkdir \
+    mktemp ostree realpath rm sha256sum sort; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        echo "required command not found: $command_name" >&2
+        exit 69
+    fi
+done
 
 if [[ ! "$expected_fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
     echo "expected fingerprint must be a 40 or 64 character hexadecimal value" >&2
@@ -75,11 +86,6 @@ if [[ "${#public_fingerprints[@]}" -ne 1 \
 fi
 gpg --batch --homedir "$gpg_home" --import "$recovery_dir/$key_name"
 gpg --batch --homedir "$gpg_home" \
-    --verify "$recovery_dir/$archive_name.asc" "$recovery_dir/$archive_name"
-gpg --batch --homedir "$gpg_home" \
-    --verify "$recovery_dir/$site_archive_name.asc" \
-    "$recovery_dir/$site_archive_name"
-gpg --batch --homedir "$gpg_home" \
     --verify "$recovery_dir/$metadata_name.asc" "$recovery_dir/$metadata_name"
 
 declare -A metadata=()
@@ -89,7 +95,7 @@ while IFS='=' read -r key value; do
         exit 65
     fi
     case "$key" in
-        format|source_run_id|source_sha|public_source_sha|release_repository|\
+        format|asset_schema|source_run_id|source_sha|public_source_sha|release_repository|\
         version|flatpak_commit|archive_sha256|site_source_sha|\
         site_archive_sha256|rollback_commit|rollback_archive_sha256|\
         rollback_site_source_sha|rollback_site_archive_sha256)
@@ -112,8 +118,7 @@ for key in format source_run_id source_sha public_source_sha \
         exit 65
     fi
 done
-if [[ "${metadata[format]}" != 3 \
-      || "${metadata[source_run_id]}" != "$expected_run_id" \
+if [[ "${metadata[source_run_id]}" != "$expected_run_id" \
       || ! "${metadata[source_sha]}" =~ ^[0-9a-f]{40}$ \
       || ! "${metadata[public_source_sha]}" =~ ^[0-9a-f]{40}$ \
       || ! "${metadata[release_repository]}" \
@@ -131,6 +136,77 @@ if [[ "${metadata[format]}" != 3 \
     echo "signed recovery metadata has invalid values" >&2
     exit 65
 fi
+
+readonly recovery_version="${metadata[version]}"
+full_recovery_files="$(
+    "$script_dir/list-release-assets.sh" "$recovery_version" recovery-input
+)"
+if [[ "${metadata[format]}" == 3 \
+      && -z "${metadata[asset_schema]+present}" \
+      && "$recovery_version" == 2.0.0 ]]; then
+    asset_schema=legacy-v1
+    expected_recovery_files="$(printf '%s\n' \
+        "$archive_name" "$archive_name.asc" \
+        "$site_archive_name" "$site_archive_name.asc" \
+        "$metadata_name" "$metadata_name.asc" "$key_name" \
+        | LC_ALL=C sort)"
+elif [[ "${metadata[format]}" == 4 \
+        && "${metadata[asset_schema]-}" == bundle-v1 ]]; then
+    IFS=. read -r version_major version_minor version_patch \
+        <<< "$recovery_version"
+    if (( 10#$version_major < 2 \
+          || (10#$version_major == 2 && 10#$version_minor == 0 \
+              && 10#$version_patch < 1) )); then
+        echo "bundle-v1 recovery requires version 2.0.1 or newer" >&2
+        exit 65
+    fi
+    asset_schema=bundle-v1
+    expected_recovery_files="$full_recovery_files"
+else
+    echo "signed recovery metadata uses an unsupported schema/version pair" >&2
+    exit 65
+fi
+
+actual_recovery_files="$(find "$recovery_dir" -mindepth 1 -maxdepth 1 \
+    -type f -printf '%f\n' | LC_ALL=C sort)"
+invalid_recovery_entries="$(find "$recovery_dir" -mindepth 1 -maxdepth 1 \
+    ! -type f -print -quit)"
+has_rollback_payload=false
+if [[ "$asset_schema" == bundle-v1 ]]; then
+    has_rollback_payload=true
+elif [[ "$actual_recovery_files" == "$full_recovery_files" ]]; then
+    expected_recovery_files="$full_recovery_files"
+    has_rollback_payload=true
+fi
+if [[ -n "$invalid_recovery_entries" \
+      || "$actual_recovery_files" != "$expected_recovery_files" ]]; then
+    echo "recovery payload inventory does not match $asset_schema" >&2
+    diff -u <(printf '%s\n' "$expected_recovery_files") \
+        <(printf '%s\n' "$actual_recovery_files") >&2 || true
+    exit 65
+fi
+readonly asset_schema expected_recovery_files has_rollback_payload
+
+if [[ "$has_rollback_payload" == true ]]; then
+    while IFS= read -r payload_name; do
+        if [[ "$payload_name" == *.asc \
+              || "$payload_name" == "$key_name" ]]; then
+            continue
+        fi
+        gpg --batch --homedir "$gpg_home" \
+            --verify "$recovery_dir/$payload_name.asc" \
+            "$recovery_dir/$payload_name"
+    done < <(
+        "$script_dir/list-release-assets.sh" "$recovery_version" recovery-input
+    )
+else
+    gpg --batch --homedir "$gpg_home" \
+        --verify "$recovery_dir/$archive_name.asc" \
+        "$recovery_dir/$archive_name"
+    gpg --batch --homedir "$gpg_home" \
+        --verify "$recovery_dir/$site_archive_name.asc" \
+        "$recovery_dir/$site_archive_name"
+fi
 actual_archive_sha256="$(sha256sum "$recovery_dir/$archive_name" | awk '{print $1}')"
 if [[ "$actual_archive_sha256" != "${metadata[archive_sha256]}" ]]; then
     echo "recovery archive checksum does not match signed metadata" >&2
@@ -143,32 +219,28 @@ if [[ "$actual_site_archive_sha256" != "${metadata[site_archive_sha256]}" ]]; th
     echo "recovery site archive checksum does not match signed metadata" >&2
     exit 65
 fi
+if [[ "$has_rollback_payload" == true ]]; then
+    actual_rollback_archive_sha256="$(
+        sha256sum "$recovery_dir/$rollback_archive_name" | awk '{print $1}'
+    )"
+    actual_rollback_site_archive_sha256="$(
+        sha256sum "$recovery_dir/$rollback_site_archive_name" | awk '{print $1}'
+    )"
+    if [[ "$actual_rollback_archive_sha256" \
+            != "${metadata[rollback_archive_sha256]}" \
+          || "$actual_rollback_site_archive_sha256" \
+            != "${metadata[rollback_site_archive_sha256]}" ]]; then
+        echo "rollback archive checksums do not match signed metadata" >&2
+        exit 65
+    fi
+fi
 
-while IFS= read -r entry; do
-    case "$entry" in
-        /*|..|../*|*/../*)
-            echo "unsafe path in recovery archive: $entry" >&2
-            exit 65
-            ;;
-    esac
-done < <(tar --zstd --list --file "$recovery_dir/$archive_name")
-mkdir -p "$repo_dir"
-tar --zstd --extract --file "$recovery_dir/$archive_name" \
-    --directory "$repo_dir" --no-same-owner --no-same-permissions
+"$script_dir/extract-recovery-archive.sh" \
+    "$recovery_dir/$archive_name" "$repo_dir"
 ostree fsck --repo="$repo_dir"
 
-while IFS= read -r entry; do
-    case "$entry" in
-        /*|..|../*|*/../*)
-            echo "unsafe path in recovery site archive: $entry" >&2
-            exit 65
-            ;;
-    esac
-done < <(tar --zstd --list --file "$recovery_dir/$site_archive_name")
-mkdir -p "$site_dir"
-tar --zstd --extract --file "$recovery_dir/$site_archive_name" \
-    --directory "$site_dir" --no-same-owner --no-same-permissions
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$script_dir/extract-recovery-archive.sh" \
+    "$recovery_dir/$site_archive_name" "$site_dir"
 "$script_dir/verify-pages-site.sh" \
     "$site_dir" release "$site_validation_mode"
 
@@ -177,6 +249,31 @@ repo_commit="$(ostree rev-parse --repo="$repo_dir" "$app_ref")"
 if [[ "$repo_commit" != "${metadata[flatpak_commit]}" ]]; then
     echo "recovery repository head does not match signed metadata" >&2
     exit 65
+fi
+
+if [[ "$has_rollback_payload" == true ]]; then
+    rollback_repo_dir="$state_root/rollback-repository"
+    rollback_site_dir="$state_root/rollback-site"
+    "$script_dir/extract-recovery-archive.sh" \
+        "$recovery_dir/$rollback_archive_name" "$rollback_repo_dir"
+    ostree fsck --repo="$rollback_repo_dir"
+    "$script_dir/extract-recovery-archive.sh" \
+        "$recovery_dir/$rollback_site_archive_name" "$rollback_site_dir"
+    "$script_dir/verify-pages-site.sh" \
+        "$rollback_site_dir" rollback "$site_validation_mode"
+    if resolved_rollback_commit="$(
+        ostree rev-parse --repo="$rollback_repo_dir" "$app_ref" 2>/dev/null
+    )"; then
+        if [[ "${metadata[rollback_commit]}" == none \
+              || "$resolved_rollback_commit" \
+                != "${metadata[rollback_commit]}" ]]; then
+            echo "rollback repository head does not match signed metadata" >&2
+            exit 65
+        fi
+    elif [[ "${metadata[rollback_commit]}" != none ]]; then
+        echo "rollback repository is missing the signed rollback commit" >&2
+        exit 65
+    fi
 fi
 
 export XDG_DATA_HOME="$state_root/data"
@@ -192,5 +289,21 @@ if [[ "$verified_commit" != "${metadata[flatpak_commit]}" ]]; then
     echo "Flatpak signature verification returned an unexpected commit" >&2
     exit 65
 fi
+if [[ "$has_rollback_payload" == true ]]; then
+    flatpak remote-add --user \
+        --gpg-import="$recovery_dir/$key_name" \
+        megawhisper-rollback-local "file://$rollback_repo_dir"
+    if [[ "${metadata[rollback_commit]}" == none ]]; then
+        flatpak remote-ls --user megawhisper-rollback-local >/dev/null
+    else
+        verified_rollback_commit="$(flatpak remote-info --user --show-commit \
+            megawhisper-rollback-local io.github.dxvsi.megawhisper)"
+        if [[ "$verified_rollback_commit" \
+              != "${metadata[rollback_commit]}" ]]; then
+            echo "Flatpak rollback signature verification returned an unexpected commit" >&2
+            exit 65
+        fi
+    fi
+fi
 
-echo "Signed Pages recovery payload verified for commit $verified_commit"
+echo "Signed Pages recovery payload verified as $asset_schema for commit $verified_commit"
