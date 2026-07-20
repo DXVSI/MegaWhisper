@@ -194,15 +194,24 @@ if [[ "$validation_mode" == strict ]]; then
     grep -Fq 'https://dxvsi.github.io/MegaWhisper/' "$index_file"
     grep -Fq 'href="https://github.com/DXVSI"' "$index_file"
     grep -Fq '>DXVSI<' "$index_file"
-    grep -Fq 'GPL-3.0-only' "$index_file"
+    grep -Fq 'Proprietary license' "$index_file"
+    grep -Fq 'href="https://github.com/DXVSI/MegaWhisper/blob/main/LICENSE"' \
+        "$index_file"
+    grep -Fq \
+        'href="https://github.com/DXVSI/MegaWhisper/blob/main/THIRD_PARTY_NOTICES.md"' \
+        "$index_file"
     grep -Fq 'data-language="en"' "$index_file"
     grep -Fq 'data-language="ru"' "$index_file"
     grep -Fq 'data-ru=' "$index_file"
     grep -Fq 'assets/site.css' "$index_file"
     grep -Fq 'assets/site.js' "$index_file"
     grep -Fq \
-        'https://github.com/DXVSI/MegaWhisper/releases/latest/download/io.github.dxvsi.megawhisper.flatpakref' \
+        'https://dxvsi.github.io/MegaWhisper/io.github.dxvsi.megawhisper.flatpakref' \
         "$index_file"
+    if grep -Eiq 'GPL-3\.0|open[- ]source|source snapshots?' "$index_file"; then
+        echo "site contains obsolete application source or GPL wording" >&2
+        exit 65
+    fi
 
     if grep -REn \
         '(src|href)="(https?:)?//[^"]+\.(css|js)([?#][^"]*)?"' \

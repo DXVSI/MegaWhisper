@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 if [[ $# -ne 5 ]]; then
-    echo "usage: $0 extract compliance|recovery VERSION INPUT_ARCHIVE OUTPUT_DIR" >&2
+    echo "usage: $0 extract third-party-compliance|recovery VERSION INPUT_ARCHIVE OUTPUT_DIR" >&2
     exit 64
 fi
 
@@ -16,8 +16,8 @@ if [[ "$operation" != extract ]]; then
     echo "the public verifier supports only bundle extraction" >&2
     exit 64
 fi
-if [[ "$bundle_kind" != compliance && "$bundle_kind" != recovery ]]; then
-    echo "bundle kind must be compliance or recovery" >&2
+if [[ "$bundle_kind" != third-party-compliance && "$bundle_kind" != recovery ]]; then
+    echo "bundle kind must be third-party-compliance or recovery" >&2
     exit 64
 fi
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -44,7 +44,12 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly script_dir
-readonly list_mode="$bundle_kind-input"
+if [[ "$bundle_kind" == third-party-compliance ]]; then
+    list_mode=third-party-compliance-input
+else
+    list_mode=recovery-input
+fi
+readonly list_mode
 mapfile -t payload_names < <(
     "$script_dir/list-release-assets.sh" "$version" "$list_mode"
 )
@@ -65,7 +70,7 @@ trap cleanup EXIT
 
 bundle_payload_names() {
     printf '%s\n' "${payload_names[@]}"
-    if [[ "$bundle_kind" == compliance ]]; then
+    if [[ "$bundle_kind" == third-party-compliance ]]; then
         printf '%s\n' COMPLIANCE.txt
     fi
 }
@@ -78,12 +83,12 @@ archive_content_names() {
 validate_metadata() {
     local root_dir="$1"
     local metadata_file expected_format
-    if [[ "$bundle_kind" == compliance ]]; then
+    if [[ "$bundle_kind" == third-party-compliance ]]; then
         metadata_file="$root_dir/COMPLIANCE.txt"
-        expected_format=1
+        expected_format=2
     else
         metadata_file="$root_dir/flatpak-pages-recovery.txt"
-        expected_format=4
+        expected_format=5
     fi
     declare -A metadata=()
     while IFS='=' read -r key value; do
@@ -95,22 +100,20 @@ validate_metadata() {
         metadata[$key]="$value"
     done < "$metadata_file"
     if [[ "${metadata[format]-}" != "$expected_format" \
-          || "${metadata[asset_schema]-}" != bundle-v1 \
+          || "${metadata[asset_schema]-}" != binary-v1 \
           || "${metadata[version]-}" != "$version" ]]; then
-        echo "$bundle_kind metadata does not identify bundle-v1 $version" >&2
+        echo "$bundle_kind metadata does not identify binary-v1 $version" >&2
         exit 65
     fi
-    if [[ "$bundle_kind" == compliance ]]; then
+    if [[ "$bundle_kind" == third-party-compliance ]]; then
         declare -A expected_metadata=(
-            [format]=1
-            [asset_schema]=bundle-v1
+            [format]=2
+            [asset_schema]=binary-v1
             [version]="$version"
             [appimage_binary]="MegaWhisper-$version-x86_64.AppImage"
             [appimage_sbom]="MegaWhisper-AppImage-$version.spdx.json"
             [flatpak_binary]="MegaWhisper-$version-x86_64.flatpak"
             [flatpak_sbom]="MegaWhisper-Flatpak-$version.spdx.json"
-            [source_archive]="MegaWhisper-$version-source.tar.zst"
-            [source_sbom]="MegaWhisper-Source-$version.spdx.json"
             [build_provenance]="MegaWhisper-$version-build-provenance.json"
             [third_party_notices]="THIRD-PARTY-NOTICES.txt"
             [appimage_opensuse_source]="MegaWhisper-AppImage-openSUSE-corresponding-source.tar.zst"
@@ -131,6 +134,51 @@ validate_metadata() {
                 exit 65
             fi
         done
+    else
+        declare -A expected_recovery_keys=(
+            [format]=1
+            [asset_schema]=1
+            [producer_run_id]=1
+            [release_repository]=1
+            [version]=1
+            [flatpak_commit]=1
+            [archive_sha256]=1
+            [distribution_sha]=1
+            [site_archive_sha256]=1
+            [rollback_commit]=1
+            [rollback_archive_sha256]=1
+            [rollback_distribution_sha]=1
+            [rollback_site_archive_sha256]=1
+        )
+        if [[ "${#metadata[@]}" -ne "${#expected_recovery_keys[@]}" ]]; then
+            echo "recovery metadata field inventory is not exact" >&2
+            exit 65
+        fi
+        local recovery_key
+        for recovery_key in "${!expected_recovery_keys[@]}"; do
+            if [[ -z "${metadata[$recovery_key]+present}" ]]; then
+                echo "recovery metadata field is missing: $recovery_key" >&2
+                exit 65
+            fi
+        done
+        if [[ ! "${metadata[producer_run_id]}" =~ ^[1-9][0-9]*$ \
+              || ! "${metadata[release_repository]}" \
+                  =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ \
+              || ! "${metadata[flatpak_commit]}" =~ ^[0-9a-f]{64}$ \
+              || ! "${metadata[archive_sha256]}" =~ ^[0-9a-f]{64}$ \
+              || ! "${metadata[distribution_sha]}" =~ ^[0-9a-f]{40}$ \
+              || ! "${metadata[site_archive_sha256]}" =~ ^[0-9a-f]{64}$ \
+              || ! "${metadata[rollback_commit]}" \
+                  =~ ^(none|[0-9a-f]{64})$ \
+              || ! "${metadata[rollback_archive_sha256]}" \
+                  =~ ^[0-9a-f]{64}$ \
+              || ! "${metadata[rollback_distribution_sha]}" \
+                  =~ ^[0-9a-f]{40}$ \
+              || ! "${metadata[rollback_site_archive_sha256]}" \
+                  =~ ^[0-9a-f]{64}$ ]]; then
+            echo "recovery metadata contains an invalid value" >&2
+            exit 65
+        fi
     fi
 }
 
