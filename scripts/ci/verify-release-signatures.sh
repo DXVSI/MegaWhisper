@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 if [[ $# -ne 4 ]]; then
-    echo "usage: $0 ARTIFACT_DIR VERSION legacy-v1|bundle-v1 EXPECTED_FINGERPRINT" >&2
+    echo "usage: $0 ARTIFACT_DIR VERSION binary-v1 EXPECTED_FINGERPRINT" >&2
     exit 64
 fi
 
@@ -15,24 +15,18 @@ if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
     echo "release verification version must be a stable semantic version" >&2
     exit 64
 fi
-if [[ "$asset_schema" != legacy-v1 && "$asset_schema" != bundle-v1 ]]; then
-    echo "asset schema must be legacy-v1 or bundle-v1" >&2
+if [[ "$asset_schema" != binary-v1 ]]; then
+    echo "asset schema must be binary-v1" >&2
     exit 64
 fi
 if [[ ! "$expected_fingerprint" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
     echo "expected release fingerprint has an invalid format" >&2
     exit 64
 fi
-if [[ "$asset_schema" == legacy-v1 && "$version" != 2.0.0 ]]; then
-    echo "legacy-v1 is valid only for v2.0.0" >&2
-    exit 64
-fi
-IFS=. read -r version_major version_minor version_patch <<< "$version"
-if [[ "$asset_schema" == bundle-v1 ]] \
-    && (( 10#$version_major < 2 \
-          || (10#$version_major == 2 && 10#$version_minor == 0 \
-              && 10#$version_patch < 1) )); then
-    echo "bundle-v1 requires version 2.0.1 or newer" >&2
+IFS=. read -r version_major version_minor _ <<< "$version"
+if (( 10#$version_major < 2 \
+      || (10#$version_major == 2 && 10#$version_minor < 1) )); then
+    echo "binary-v1 requires version 2.1.0 or newer" >&2
     exit 64
 fi
 for required_file in megawhisper-release-key.asc SHA256SUMS SHA256SUMS.asc; do
@@ -46,13 +40,8 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly script_dir
-if [[ "$asset_schema" == legacy-v1 ]]; then
-    list_mode=legacy-release
-    payload_mode=legacy-payload
-else
-    list_mode=release
-    payload_mode=payload
-fi
+list_mode=release
+payload_mode=payload
 readonly list_mode payload_mode
 expected_assets="$(
     "$script_dir/list-release-assets.sh" "$version" "$list_mode"
@@ -98,34 +87,19 @@ gpg --batch --homedir "$verify_home" \
 gpg --batch --homedir "$verify_home" \
     --verify "$artifact_dir/SHA256SUMS.asc" "$artifact_dir/SHA256SUMS"
 
-if [[ "$asset_schema" == bundle-v1 ]]; then
-    checksum_names="$(awk '
-        NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || substr($2, 1, 1) != "*" {
-            exit 65
-        }
-        {
-            name=substr($2, 2)
-            if (name == "" || name ~ /\// || name ~ /^\./) exit 65
-            print name
-        }
-    ' "$artifact_dir/SHA256SUMS" | LC_ALL=C sort)" || {
-        echo "bundle-v1 SHA256SUMS has an invalid entry" >&2
+checksum_names="$(awk '
+    NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || substr($2, 1, 1) != "*" {
         exit 65
     }
-else
-    checksum_names="$(awk '
-        NF != 2 || $1 !~ /^[0-9a-f]{64}$/ { exit 65 }
-        {
-            name=$2
-            sub(/^\*/, "", name)
-            if (name == "" || name ~ /\// || name ~ /^\./) exit 65
-            print name
-        }
-    ' "$artifact_dir/SHA256SUMS" | LC_ALL=C sort)" || {
-        echo "legacy-v1 SHA256SUMS has an invalid entry" >&2
-        exit 65
+    {
+        name=substr($2, 2)
+        if (name == "" || name ~ /\// || name ~ /^\./) exit 65
+        print name
     }
-fi
+' "$artifact_dir/SHA256SUMS" | LC_ALL=C sort)" || {
+    echo "binary-v1 SHA256SUMS has an invalid entry" >&2
+    exit 65
+}
 expected_checksum_names="$(
     "$script_dir/list-release-assets.sh" "$version" "$payload_mode"
 )"
@@ -138,23 +112,10 @@ fi
     sha256sum --check --strict SHA256SUMS
 )
 
-if [[ "$asset_schema" == legacy-v1 ]]; then
-    while IFS= read -r payload_name; do
-        if [[ "$payload_name" == megawhisper-release-key.asc ]]; then
-            continue
-        fi
-        gpg --batch --homedir "$verify_home" \
-            --verify "$artifact_dir/$payload_name.asc" \
-            "$artifact_dir/$payload_name"
-    done <<< "$expected_checksum_names"
-    echo "Verified legacy-v1 release checksums and detached signatures"
-    exit 0
-fi
-
-compliance_dir="$bundle_root/compliance"
+compliance_dir="$bundle_root/third-party-compliance"
 recovery_dir="$bundle_root/recovery"
-"$script_dir/release-bundles.sh" extract compliance "$version" \
-    "$artifact_dir/MegaWhisper-$version-compliance.tar.zst" \
+"$script_dir/release-bundles.sh" extract third-party-compliance "$version" \
+    "$artifact_dir/MegaWhisper-$version-third-party-compliance.tar.zst" \
     "$compliance_dir"
 "$script_dir/release-bundles.sh" extract recovery "$version" \
     "$artifact_dir/MegaWhisper-$version-recovery.tar.zst" \
@@ -175,4 +136,4 @@ while IFS= read -r file_name; do
         "$recovery_dir/$file_name"
 done < <("$script_dir/list-release-assets.sh" "$version" recovery-input)
 
-echo "Verified bundle-v1 release checksums, bundles and recovery signatures"
+echo "Verified binary-v1 release checksums, bundles and recovery signatures"

@@ -39,9 +39,9 @@ jobs:
     env:
       FLATPAK_REPO_URL: https://dxvsi.github.io/MegaWhisper
       OPERATION: ${{ github.event.client_payload.operation }}
-      SOURCE_RUN_ID: >-
-        ${{ github.event.client_payload.release_payload.source_run_id
-            || github.event.client_payload.source_run_id }}
+      PRODUCER_RUN_ID: >-
+        ${{ github.event.client_payload.release_payload.producer_run_id
+            || github.event.client_payload.producer_run_id }}
       DISPATCH_RUN_ID: >-
         ${{ github.event.client_payload.release_payload.dispatch_run_id
             || github.event.client_payload.dispatch_run_id }}
@@ -51,12 +51,6 @@ jobs:
       DISPATCH_ID: >-
         ${{ github.event.client_payload.release_payload.dispatch_id
             || github.event.client_payload.dispatch_id }}
-      SOURCE_SHA: >-
-        ${{ github.event.client_payload.release_payload.source_sha
-            || github.event.client_payload.source_sha }}
-      PUBLIC_SOURCE_SHA: >-
-        ${{ github.event.client_payload.release_payload.public_source_sha
-            || github.event.client_payload.public_source_sha }}
       DISTRIBUTION_SHA: >-
         ${{ github.event.client_payload.release_payload.distribution_sha
             || github.event.client_payload.distribution_sha }}
@@ -87,13 +81,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [[ "$OPERATION" != release \
-                || ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ \
+                || ! "$PRODUCER_RUN_ID" =~ ^[1-9][0-9]*$ \
                 || ! "$DISPATCH_RUN_ID" =~ ^[1-9][0-9]*$ \
                 || ! "$DISPATCH_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ \
                 || "$DISPATCH_ID" \
                     != "$DISPATCH_RUN_ID-$DISPATCH_RUN_ATTEMPT-release" \
-                || ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
-                || ! "$PUBLIC_SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
                 || ! "$DISTRIBUTION_SHA" =~ ^[0-9a-f]{40}$ \
                 || ! "$RELEASE_TAG" \
                     =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
@@ -108,21 +100,14 @@ jobs:
             echo "Public distribution workflow is running in an unexpected repository" >&2
             exit 65
           fi
-          if [[ "$RELEASE_VERSION" == 2.0.0 \
-                && ( -z "$ASSET_SCHEMA" || "$ASSET_SCHEMA" == legacy-v1 ) ]]; then
-            echo "ASSET_SCHEMA=legacy-v1" >> "$GITHUB_ENV"
-          else
-            IFS=. read -r version_major version_minor version_patch \
-              <<< "$RELEASE_VERSION"
-            if [[ "$ASSET_SCHEMA" != bundle-v1 \
-                  || ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
-                  || "$ASSET_INVENTORY" == null ]] \
-                || (( 10#$version_major < 2 \
-                      || (10#$version_major == 2 && 10#$version_minor == 0 \
-                          && 10#$version_patch < 1) )); then
-              echo "Unsupported release asset schema/version pair" >&2
-              exit 64
-            fi
+          IFS=. read -r version_major version_minor _ <<< "$RELEASE_VERSION"
+          if [[ "$ASSET_SCHEMA" != binary-v1 \
+                || ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+                || "$ASSET_INVENTORY" == null ]] \
+              || (( 10#$version_major < 2 \
+                    || (10#$version_major == 2 && 10#$version_minor < 1) )); then
+            echo "Unsupported release asset schema/version pair" >&2
+            exit 64
           fi
 
       - name: Checkout protected public distribution verifiers
@@ -130,7 +115,7 @@ jobs:
         with:
           ref: ${{ env.DISTRIBUTION_SHA }}
           submodules: false
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install distribution verification tooling
@@ -139,7 +124,7 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            curl flatpak gnupg jq libxml2-utils ostree zstd
+            binutils curl flatpak gnupg jq libxml2-utils ostree zstd
           sudo flatpak remote-add --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
           platform_commit=8d76cf000aa3ea5994b96e9de32bfdb07049213df3c4a1a72af311ebec5e2647
@@ -151,7 +136,7 @@ jobs:
             org.kde.Platform 6.11)" == "$platform_commit" ]]
 
       - id: state
-        name: Verify public source, draft assets and signed repository states
+        name: Verify distribution tag, draft assets and signed repository states
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,58 +157,30 @@ jobs:
           fi
           # shellcheck disable=SC2153
           git fetch --force --no-tags origin \
-            "+refs/tags/$RELEASE_TAG:refs/ci/public-source"
-          public_tag_sha="$(git rev-parse 'refs/ci/public-source^{commit}')"
-          remote_tag_type="$(git cat-file -t refs/ci/public-source)"
-          remote_tag_sha="$(git rev-parse refs/ci/public-source)"
-          source_graph="$(git show refs/ci/public-source:SOURCE-GRAPH.txt)"
-          metadata_source_sha="$(awk -F= \
-            '$1 == "source_sha" { count++; value=$2 }
-             END { if (count == 1) print value }' <<< "$source_graph")"
-          metadata_version="$(awk -F= \
-            '$1 == "version" { count++; value=$2 }
-             END { if (count == 1) print value }' <<< "$source_graph")"
-          if [[ "$public_tag_sha" != "$PUBLIC_SOURCE_SHA" \
+            "+refs/tags/$RELEASE_TAG:refs/ci/distribution-tag"
+          distribution_tag_commit="$(git rev-parse \
+            'refs/ci/distribution-tag^{commit}')"
+          remote_tag_type="$(git cat-file -t refs/ci/distribution-tag)"
+          remote_tag_sha="$(git rev-parse refs/ci/distribution-tag)"
+          if [[ "$distribution_tag_commit" != "$DISTRIBUTION_SHA" \
                 || "$remote_tag_type" != commit \
-                || "$remote_tag_sha" != "$PUBLIC_SOURCE_SHA" \
-                || "$metadata_source_sha" != "$SOURCE_SHA" \
-                || "$metadata_version" != "$RELEASE_VERSION" ]]; then
-            echo "Public source tag does not match the dispatched private source identity" >&2
+                || "$remote_tag_sha" != "$DISTRIBUTION_SHA" ]]; then
+            echo "Public release tag does not match the pinned distribution commit" >&2
             exit 65
           fi
-          if [[ "$(wc -w < <(git rev-list --parents -n 1 \
-              refs/ci/public-source))" -ne 1 ]]; then
-            echo "Public source snapshot must remain an orphan commit" >&2
+          tag_tree="$(git ls-tree -r --name-only refs/ci/distribution-tag)"
+          if grep -Eiq '(^|/)(src|tests?|external)(/|$)|\.(c|cpp|cc|cxx|h|hh|hpp|pro|ui|qrc)$|(^|/)CMakeLists\.txt$|(^|/)SOURCE[-_]GRAPH\.txt$' \
+              <<< "$tag_tree" \
+              || grep -Eq \
+                "(^|/)MegaWhisper-$RELEASE_VERSION-source\\.tar\\.zst$|(^|/)MegaWhisper-Source-$RELEASE_VERSION\\.spdx\\.json$" \
+                <<< "$tag_tree"; then
+            echo "Public distribution tag contains application source material" >&2
             exit 65
           fi
 
-          fetch_release_list() {
-            local attempt candidate
-            for attempt in 1 2 3; do
-              echo "Fetching public release list, attempt $attempt of 3" >&2
-              if candidate="$(gh api \
-                  "repos/$GITHUB_REPOSITORY/releases?per_page=100")" \
-                  && jq -e 'type == "array"' <<< "$candidate" >/dev/null; then
-                printf '%s' "$candidate"
-                return 0
-              fi
-            done
-            return 1
-          }
-          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
-            # shellcheck disable=SC2153
-            release_json="$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
-          else
-            releases_json="$(fetch_release_list)" || {
-              echo "Public release list remained unavailable" >&2
-              exit 69
-            }
-            release_json="$(jq -c --arg tag "$RELEASE_TAG" \
-              '[.[] | select(.tag_name == $tag)]
-               | if length == 1 then .[0] else empty end' \
-              <<< "$releases_json")"
-          fi
+          # shellcheck disable=SC2153
+          release_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
           if [[ -z "$release_json" ]]; then
             echo "Public release list did not return one exact release" >&2
             exit 65
@@ -240,22 +197,19 @@ jobs:
           is_draft="$(jq -r '.draft' <<< "$release_json")"
           is_prerelease="$(jq -r '.prerelease' <<< "$release_json")"
           release_tag="$(jq -r '.tag_name // empty' <<< "$release_json")"
+          release_target="$(jq -r '.target_commitish // empty' \
+            <<< "$release_json")"
           if [[ "$is_prerelease" != false || "$release_tag" != "$RELEASE_TAG" \
                 || ! "$release_id" =~ ^[1-9][0-9]*$ \
-                || ( "$ASSET_SCHEMA" == bundle-v1 \
-                     && "$release_id" != "$RELEASE_ID" ) \
+                || "$release_id" != "$RELEASE_ID" \
+                || "$release_target" != "$DISTRIBUTION_SHA" \
                 || ( "$is_draft" != true && "$is_draft" != false ) ]]; then
             echo "Public release has an invalid identity or state" >&2
             exit 65
           fi
 
-          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
-            release_list_mode=legacy-release
-          else
-            release_list_mode=release
-          fi
           expected_assets="$(scripts/ci/list-release-assets.sh \
-            "$RELEASE_VERSION" "$release_list_mode")"
+            "$RELEASE_VERSION" release)"
           api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
             | LC_ALL=C sort)"
           api_asset_inventory="$(jq -c '
@@ -271,31 +225,28 @@ jobs:
             echo "Public release API inventory does not match $ASSET_SCHEMA" >&2
             exit 65
           fi
-          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
-            dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
-              <<< "$ASSET_INVENTORY")"
-            if [[ "$dispatched_asset_inventory" != "$api_asset_inventory" ]] \
-                || ! jq -e '
-                  length == 11
-                  and all(.[];
-                    (.id | type) == "number" and .id > 0
-                    and (.name | type) == "string"
-                    and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
-                    and (.size | type) == "number" and .size > 0
-                    and (.digest | type) == "string"
-                    and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
-                  <<< "$dispatched_asset_inventory" >/dev/null; then
-              echo "Public release API inventory differs from dispatch" >&2
-              exit 65
-            fi
+          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+            <<< "$ASSET_INVENTORY")"
+          if [[ "$dispatched_asset_inventory" != "$api_asset_inventory" ]] \
+              || ! jq -e '
+                length == 10
+                and all(.[];
+                  (.id | type) == "number" and .id > 0
+                  and (.name | type) == "string"
+                  and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
+                  and (.size | type) == "number" and .size > 0
+                  and (.digest | type) == "string"
+                  and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+                <<< "$dispatched_asset_inventory" >/dev/null; then
+            echo "Public release API inventory differs from dispatch" >&2
+            exit 65
           fi
 
           mkdir -p release-assets
           asset_count="$(jq '.assets | length' <<< "$release_json")"
           unique_asset_count="$(jq '[.assets[].name] | unique | length' \
             <<< "$release_json")"
-          if [[ ! "$asset_count" =~ ^[1-9][0-9]*$ \
-                || "$unique_asset_count" != "$asset_count" ]]; then
+          if [[ "$asset_count" != 10 || "$unique_asset_count" != 10 ]]; then
             echo "Public release asset inventory is empty or ambiguous" >&2
             exit 65
           fi
@@ -352,49 +303,44 @@ jobs:
           scripts/ci/verify-release-signatures.sh \
             release-assets "$RELEASE_VERSION" "$ASSET_SCHEMA" "$fingerprint"
 
+          compliance_root=third-party-compliance-assets
+          mkdir -p "$compliance_root"
+          scripts/ci/release-bundles.sh extract third-party-compliance \
+            "$RELEASE_VERSION" \
+            "release-assets/MegaWhisper-$RELEASE_VERSION-third-party-compliance.tar.zst" \
+            "$compliance_root"
+          if grep -REqI \
+              -e 'SOURCE[-_]GRAPH\.txt' \
+              -e "MegaWhisper-$RELEASE_VERSION-source\\.tar\\.zst" \
+              -e "MegaWhisper-Source-$RELEASE_VERSION\\.spdx\\.json" \
+              -e '(^|["[:space:]])[a-z_]*source[a-z_]*sha["=:]' \
+              -e '/home/(runner|dx)/' \
+              -e '/__w/[^/]+/[^/]+' "$compliance_root"; then
+            echo "Third-party compliance metadata exposes application source identity" >&2
+            exit 65
+          fi
+
           recovery_root=recovery-assets
           mkdir -p "$recovery_root"
-          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
-            scripts/ci/release-bundles.sh extract recovery \
-              "$RELEASE_VERSION" \
-              "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
-              "$recovery_root"
-          else
-            for file_name in \
-              MegaWhisper-flatpak-repo.tar.zst \
-              MegaWhisper-flatpak-repo.tar.zst.asc \
-              MegaWhisper-flatpak-rollback-repo.tar.zst \
-              MegaWhisper-flatpak-rollback-repo.tar.zst.asc \
-              MegaWhisper-pages-site.tar.zst \
-              MegaWhisper-pages-site.tar.zst.asc \
-              MegaWhisper-pages-rollback-site.tar.zst \
-              MegaWhisper-pages-rollback-site.tar.zst.asc \
-              flatpak-pages-recovery.txt \
-              flatpak-pages-recovery.txt.asc \
-              megawhisper-release-key.asc; do
-              install -m 0600 \
-                "release-assets/$file_name" "$recovery_root/$file_name"
-            done
-          fi
+          scripts/ci/release-bundles.sh extract recovery \
+            "$RELEASE_VERSION" \
+            "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
+            "$recovery_root"
           recovery_metadata="$recovery_root/flatpak-pages-recovery.txt"
           metadata_format="$(awk -F= '$1 == "format" { print $2 }' \
             "$recovery_metadata")"
           metadata_asset_schema="$(awk -F= \
             '$1 == "asset_schema" { print $2 }' "$recovery_metadata")"
-          metadata_run_id="$(awk -F= '$1 == "source_run_id" { print $2 }' \
+          metadata_run_id="$(awk -F= '$1 == "producer_run_id" { print $2 }' \
             "$recovery_metadata")"
-          metadata_source="$(awk -F= '$1 == "source_sha" { print $2 }' \
-            "$recovery_metadata")"
-          metadata_public_source="$(awk -F= \
-            '$1 == "public_source_sha" { print $2 }' "$recovery_metadata")"
           metadata_repository="$(awk -F= \
             '$1 == "release_repository" { print $2 }' "$recovery_metadata")"
           metadata_version="$(awk -F= '$1 == "version" { print $2 }' \
             "$recovery_metadata")"
           metadata_commit="$(awk -F= '$1 == "flatpak_commit" { print $2 }' \
             "$recovery_metadata")"
-          metadata_site_source="$(awk -F= \
-            '$1 == "site_source_sha" { print $2 }' "$recovery_metadata")"
+          metadata_distribution="$(awk -F= \
+            '$1 == "distribution_sha" { print $2 }' "$recovery_metadata")"
           site_archive_sha="$(awk -F= \
             '$1 == "site_archive_sha256" { print $2 }' \
             "$recovery_metadata")"
@@ -402,38 +348,23 @@ jobs:
             "$recovery_metadata")"
           rollback_archive_sha="$(awk -F= \
             '$1 == "rollback_archive_sha256" { print $2 }' "$recovery_metadata")"
-          rollback_site_source="$(awk -F= \
-            '$1 == "rollback_site_source_sha" { print $2 }' \
+          rollback_distribution="$(awk -F= \
+            '$1 == "rollback_distribution_sha" { print $2 }' \
             "$recovery_metadata")"
           rollback_site_archive_sha="$(awk -F= \
             '$1 == "rollback_site_archive_sha256" { print $2 }' \
             "$recovery_metadata")"
-          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
-            metadata_schema_valid=false
-            if [[ "$metadata_format" == 3 \
-                  && -z "$metadata_asset_schema" \
-                  && "$metadata_version" == 2.0.0 ]]; then
-              metadata_schema_valid=true
-            fi
-          else
-            metadata_schema_valid=false
-            if [[ "$metadata_format" == 4 \
-                  && "$metadata_asset_schema" == bundle-v1 ]]; then
-              metadata_schema_valid=true
-            fi
-          fi
-          if [[ "$metadata_schema_valid" != true \
-                || "$metadata_run_id" != "$SOURCE_RUN_ID" \
-                || "$metadata_source" != "$SOURCE_SHA" \
-                || "$metadata_public_source" != "$PUBLIC_SOURCE_SHA" \
+          if [[ "$metadata_format" != 5 \
+                || "$metadata_asset_schema" != binary-v1 \
+                || "$metadata_run_id" != "$PRODUCER_RUN_ID" \
                 || "$metadata_repository" != "$GITHUB_REPOSITORY" \
                 || "$metadata_version" != "$RELEASE_VERSION" \
                 || "$metadata_commit" != "$EXPECTED_FLATPAK_COMMIT" \
-                || "$metadata_site_source" != "$DISTRIBUTION_SHA" \
+                || "$metadata_distribution" != "$DISTRIBUTION_SHA" \
                 || ! "$site_archive_sha" =~ ^[0-9a-f]{64}$ \
                 || "$metadata_rollback" != "$EXPECTED_ROLLBACK_COMMIT" \
                 || ! "$rollback_archive_sha" =~ ^[0-9a-f]{64}$ \
-                || ! "$rollback_site_source" =~ ^[0-9a-f]{40}$ \
+                || ! "$rollback_distribution" =~ ^[0-9a-f]{40}$ \
                 || ! "$rollback_site_archive_sha" =~ ^[0-9a-f]{64}$ ]]; then
             echo "Signed Flatpak deployment metadata does not match the dispatch" >&2
             exit 65
@@ -441,7 +372,24 @@ jobs:
 
           scripts/ci/verify-pages-recovery.sh \
             "$recovery_root" candidate-repo candidate-site \
-            "$fingerprint" "$SOURCE_RUN_ID" strict
+            "$fingerprint" "$PRODUCER_RUN_ID" strict
+          scripts/ci/verify-flatpak-release-repo.sh candidate-repo stable
+
+          binary_scan_root="$GITHUB_WORKSPACE/binary-scan"
+          install -d -m 0755 "$binary_scan_root/appimage"
+          appimage_asset="$GITHUB_WORKSPACE/release-assets/MegaWhisper-$RELEASE_VERSION-x86_64.AppImage"
+          chmod 0755 "$appimage_asset"
+          (
+            cd "$binary_scan_root/appimage"
+            "$appimage_asset" --appimage-extract >/dev/null
+          )
+          ostree --repo=candidate-repo checkout \
+            "$EXPECTED_FLATPAK_COMMIT" "$binary_scan_root/flatpak"
+          scripts/ci/verify-binary-release-content.sh \
+            "$RELEASE_VERSION" release-assets \
+            "$binary_scan_root/appimage/squashfs-root" \
+            "$binary_scan_root/flatpak"
+
           install -m 0644 "$recovery_metadata" \
             candidate-repo/flatpak-active-state.txt
           install -m 0644 "$recovery_metadata.asc" \
@@ -470,6 +418,11 @@ jobs:
             echo "Rollback repository does not expose the expected commit" >&2
             exit 65
           fi
+          if [[ "$EXPECTED_ROLLBACK_COMMIT" == none ]]; then
+            scripts/ci/verify-flatpak-release-repo.sh rollback-repo empty
+          else
+            scripts/ci/verify-flatpak-release-repo.sh rollback-repo stable
+          fi
 
           rollback_site_archive="$recovery_root/MegaWhisper-pages-rollback-site.tar.zst"
           actual_rollback_site_archive_sha="$(sha256sum \
@@ -497,7 +450,7 @@ jobs:
             fi
             echo "release_id=$release_id"
             echo "fingerprint=$fingerprint"
-            echo "site_source_sha=$metadata_site_source"
+            echo "distribution_sha=$metadata_distribution"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install and smoke-test the signed candidate locally
@@ -586,6 +539,7 @@ jobs:
             if (( SECONDS >= deadline )); then
               break
             fi
+            sleep 5
           done
           if [[ "$pages_verified" -ne 1 ]]; then
             echo "Stable Pages state differs from the signed candidate" >&2
@@ -671,29 +625,29 @@ jobs:
             echo "Public release ID is invalid" >&2
             exit 65
           fi
-          fetch_release_list() {
+          fetch_exact_release() {
             local attempt candidate
             for attempt in 1 2 3; do
-              echo "Fetching public release list, attempt $attempt of 3" >&2
+              echo "Fetching exact public release, attempt $attempt of 3" >&2
               if candidate="$(gh api \
-                  "repos/$GITHUB_REPOSITORY/releases?per_page=100")" \
-                  && jq -e 'type == "array"' <<< "$candidate" >/dev/null; then
+                  "repos/$GITHUB_REPOSITORY/releases/$release_id")" \
+                  && jq -e 'type == "object"' <<< "$candidate" >/dev/null; then
                 printf '%s' "$candidate"
                 return 0
+              fi
+              if [[ "$attempt" -lt 3 ]]; then
+                sleep "$attempt"
               fi
             done
             return 1
           }
-          releases_json="$(fetch_release_list)" || {
-            echo "Public release list remained unavailable" >&2
+          release_json="$(fetch_exact_release)" || {
+            echo "Exact public release remained unavailable" >&2
             exit 69
           }
-          release_json="$(jq -c --argjson id "$release_id" \
-            --arg tag "$RELEASE_TAG" \
-            '[.[] | select(.id == $id and .tag_name == $tag)]
-             | if length == 1 then .[0] else empty end' \
-            <<< "$releases_json")"
-          if [[ -z "$release_json" ]]; then
+          if ! jq -e --argjson id "$release_id" --arg tag "$RELEASE_TAG" '
+              .id == $id and .tag_name == $tag
+            ' <<< "$release_json" >/dev/null; then
             echo "Public release identity changed before publication" >&2
             exit 65
           fi
@@ -705,41 +659,38 @@ jobs:
             echo "Public release returned invalid state types" >&2
             exit 65
           fi
-          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
-            current_asset_inventory="$(jq -c '
-              [.assets[]
-                | {
-                    id: .id,
-                    name: .name,
-                    size: .size,
-                    digest: .digest
-                  }
-              ] | sort_by(.name)' <<< "$release_json")"
-            dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
-              <<< "$ASSET_INVENTORY")"
-            if [[ "$current_asset_inventory" \
-                    != "$dispatched_asset_inventory" ]] \
-                || ! jq -e '
-                  (.assets | length) == 11
-                  and ([.assets[].name] | unique | length) == 11
-                  and all(.assets[];
-                    .state == "uploaded"
-                    and (.id | type) == "number" and .id > 0
-                    and (.name | type) == "string"
-                    and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
-                    and (.size | type) == "number" and .size > 0
-                    and (.digest | type) == "string"
-                    and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
-                  <<< "$release_json" >/dev/null; then
-              echo "Public release assets changed after verification" >&2
-              exit 65
-            fi
+          current_asset_inventory="$(jq -c '
+            [.assets[]
+              | {
+                  id: .id,
+                  name: .name,
+                  size: .size,
+                  digest: .digest
+                }
+            ] | sort_by(.name)' <<< "$release_json")"
+          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+            <<< "$ASSET_INVENTORY")"
+          if [[ "$current_asset_inventory" \
+                  != "$dispatched_asset_inventory" ]] \
+              || ! jq -e '
+                (.assets | length) == 10
+                and ([.assets[].name] | unique | length) == 10
+                and all(.assets[];
+                  .state == "uploaded"
+                  and (.id | type) == "number" and .id > 0
+                  and (.name | type) == "string"
+                  and (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]*$"))
+                  and (.size | type) == "number" and .size > 0
+                  and (.digest | type) == "string"
+                  and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+                <<< "$release_json" >/dev/null; then
+            echo "Public release assets changed after verification" >&2
+            exit 65
           fi
           current_draft="$(jq -r '.draft' <<< "$release_json")"
           target_commitish="$(jq -r '.target_commitish // empty' \
             <<< "$release_json")"
-          if [[ -z "$target_commitish" \
-                || "$target_commitish" == *$'\n'* ]]; then
+          if [[ "$target_commitish" != "$DISTRIBUTION_SHA" ]]; then
             echo "Public release target commitish is invalid" >&2
             exit 65
           fi
@@ -751,51 +702,223 @@ jobs:
             echo "Public release draft state is invalid" >&2
             exit 65
           fi
-          published_tags="$(jq -r \
-            '.[] | select(.draft == false and .prerelease == false)
-              | .tag_name' <<< "$releases_json")"
+          published_tags="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[]
+              | select(.draft == false and .prerelease == false
+                and (.tag_name
+                  | test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")))
+              | .tag_name')"
           highest_tag="$(printf '%s\n%s\n' "$RELEASE_TAG" "$published_tags" \
             | sed '/^$/d' | LC_ALL=C sort -V | tail -n 1)"
-          if [[ "$highest_tag" == "$RELEASE_TAG" ]]; then
-            make_latest=true
-          else
-            make_latest=false
+          if [[ "$highest_tag" != "$RELEASE_TAG" ]]; then
+            echo "Refusing to publish a site release older than the current stable release" >&2
+            exit 65
           fi
           echo "state=unknown" >> "$GITHUB_OUTPUT"
-          if published_json="$(gh api --method PATCH \
+          set +e
+          gh api --method PATCH \
               --header 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               -f tag_name="$RELEASE_TAG" \
-              -f target_commitish="$target_commitish" \
+              -f target_commitish="$DISTRIBUTION_SHA" \
               -F draft=false \
               -F prerelease=false \
-              -f make_latest="$make_latest")"; then
-            published_tag="$(jq -r '.tag_name // empty' \
-              <<< "$published_json")"
-            published_draft=""
-            if jq -e \
-                'has("draft") and ((.draft | type) == "boolean")
-                 and has("prerelease")
-                 and ((.prerelease | type) == "boolean")' \
-                <<< "$published_json" >/dev/null; then
-              published_draft="$(jq -r '.draft' <<< "$published_json")"
-            fi
-            observed_releases="$(fetch_release_list)" || observed_releases=""
-            observed_draft=""
-            if [[ -n "$observed_releases" ]]; then
-              observed_draft="$(jq -r --argjson id "$release_id" \
-                '.[] | select(.id == $id) | .draft' \
-                <<< "$observed_releases")"
-            fi
-            if [[ "$published_tag" == "$RELEASE_TAG" \
-                  && "$published_draft" == false \
-                  && "$observed_draft" == false ]]; then
-              echo "state=published" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+              -f make_latest=true \
+              > "$RUNNER_TEMP/megawhisper-publish-response.json"
+          patch_status=$?
+          set -e
+          if [[ "$patch_status" -ne 0 ]]; then
+            echo "Release publication request failed; reading back exact state" >&2
           fi
+
+          observed_state=unknown
+          for attempt in 1 2 3 4 5; do
+            echo "Reading back public release state, attempt $attempt of 5" >&2
+            if observed_release="$(gh api \
+                  "repos/$GITHUB_REPOSITORY/releases/$release_id")" \
+                && jq -e \
+                  --argjson id "$release_id" \
+                  --arg tag "$RELEASE_TAG" \
+                  --arg target "$DISTRIBUTION_SHA" '
+                  .id == $id
+                  and .tag_name == $tag
+                  and .target_commitish == $target
+                  and has("draft") and ((.draft | type) == "boolean")
+                  and has("prerelease")
+                  and ((.prerelease | type) == "boolean")
+                ' <<< "$observed_release" >/dev/null; then
+              observed_asset_inventory="$(jq -c '
+                [.assets[]
+                  | {
+                      id: .id,
+                      name: .name,
+                      size: .size,
+                      digest: .digest
+                    }
+                ] | sort_by(.name)' <<< "$observed_release")"
+              if [[ "$observed_asset_inventory" \
+                    != "$dispatched_asset_inventory" ]]; then
+                observed_state=unknown
+                if [[ "$attempt" -lt 5 ]]; then
+                  sleep "$attempt"
+                fi
+                continue
+              fi
+              observed_draft="$(jq -r '.draft' <<< "$observed_release")"
+              observed_prerelease="$(jq -r '.prerelease' \
+                <<< "$observed_release")"
+              if [[ "$observed_draft" == false \
+                    && "$observed_prerelease" == false ]]; then
+                observed_state=published
+                break
+              fi
+              if [[ "$observed_draft" == true ]]; then
+                observed_state=draft
+              else
+                observed_state=unknown
+              fi
+            else
+              observed_state=unknown
+            fi
+            if [[ "$attempt" -lt 5 ]]; then
+              sleep "$attempt"
+            fi
+          done
+          if [[ "$observed_state" == published ]]; then
+            echo "state=published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$observed_state" == draft ]]; then
+            echo "state=draft" >> "$GITHUB_OUTPUT"
+            echo "Release remained a draft; previous Pages state may be restored" >&2
+            exit 75
+          fi
+          echo "state=unknown" >> "$GITHUB_OUTPUT"
           echo "Release publication state is ambiguous; automatic rollback is suppressed" >&2
           exit 75
+
+      - name: Reconcile and verify exact latest stable release identity
+        if: >-
+          ${{ steps.state.outputs.mode == 'reconciled'
+              || (steps.state.outputs.mode == 'deploy'
+                  && steps.publish.outcome == 'success') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.state.outputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck disable=SC2153
+          release_id="$RELEASE_ID"
+          if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Public release ID is invalid" >&2
+            exit 65
+          fi
+          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+            <<< "$ASSET_INVENTORY")"
+          exact_release="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          if ! jq -e \
+              --argjson id "$release_id" \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$DISTRIBUTION_SHA" '
+              .id == $id
+              and .tag_name == $tag
+              and .target_commitish == $target
+              and .draft == false
+              and .prerelease == false
+              and (.assets | length) == 10
+            ' <<< "$exact_release" >/dev/null; then
+            echo "Published release identity changed before latest reconciliation" >&2
+            exit 65
+          fi
+          exact_asset_inventory="$(jq -c '
+            [.assets[]
+              | {
+                  id: .id,
+                  name: .name,
+                  size: .size,
+                  digest: .digest
+                }
+            ] | sort_by(.name)' <<< "$exact_release")"
+          if [[ "$exact_asset_inventory" != "$dispatched_asset_inventory" ]]; then
+            echo "Published release assets changed before latest reconciliation" >&2
+            exit 65
+          fi
+
+          published_tags="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[]
+              | select(.draft == false and .prerelease == false
+                and (.tag_name
+                  | test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")))
+              | .tag_name')"
+          if [[ "$(grep -Fxc "$RELEASE_TAG" <<< "$published_tags")" -ne 1 ]]; then
+            echo "Published release list does not contain one exact candidate" >&2
+            exit 65
+          fi
+          highest_tag="$(printf '%s\n' "$published_tags" \
+            | sed '/^$/d' | LC_ALL=C sort -V | tail -n 1)"
+          if [[ "$highest_tag" != "$RELEASE_TAG" ]]; then
+            echo "Refusing to replace a newer stable release as latest" >&2
+            exit 65
+          fi
+
+          set +e
+          gh api --method PATCH \
+            --header 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="$DISTRIBUTION_SHA" \
+            -F draft=false \
+            -F prerelease=false \
+            -f make_latest=true \
+            > "$RUNNER_TEMP/megawhisper-latest-response.json"
+          latest_patch_status=$?
+          set -e
+          if [[ "$latest_patch_status" -ne 0 ]]; then
+            echo "Latest reconciliation request failed; reading back exact state" >&2
+          fi
+          latest_verified=0
+          for attempt in 1 2 3 4 5; do
+            echo "Checking latest stable release, attempt $attempt of 5"
+            if latest_release="$(gh api \
+                  "repos/$GITHUB_REPOSITORY/releases/latest")" \
+                && jq -e \
+                  --argjson id "$release_id" \
+                  --arg tag "$RELEASE_TAG" \
+                  --arg target "$DISTRIBUTION_SHA" '
+                  .id == $id
+                  and .tag_name == $tag
+                  and .target_commitish == $target
+                  and .draft == false
+                  and .prerelease == false
+                  and (.assets | length) == 10
+                ' <<< "$latest_release" >/dev/null; then
+              latest_asset_inventory="$(jq -c '
+                [.assets[]
+                  | {
+                      id: .id,
+                      name: .name,
+                      size: .size,
+                      digest: .digest
+                    }
+                ] | sort_by(.name)' <<< "$latest_release")"
+              if [[ "$latest_asset_inventory" \
+                    == "$dispatched_asset_inventory" ]]; then
+                latest_verified=1
+                break
+              fi
+            fi
+            if [[ "$attempt" -lt 5 ]]; then
+              sleep "$attempt"
+            fi
+          done
+          if [[ "$latest_verified" -ne 1 ]]; then
+            echo "Latest stable release does not resolve to the published candidate" >&2
+            exit 65
+          fi
 
       - id: rollback-deployment
         name: Restore the exact previous Pages state after failed deployment
@@ -844,7 +967,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           submodules: false
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install recovery verification tooling
@@ -869,8 +992,7 @@ jobs:
           DISPATCH_RUN_ID: ${{ github.event.client_payload.dispatch_run_id }}
           DISPATCH_RUN_ATTEMPT: ${{ github.event.client_payload.dispatch_run_attempt }}
           DISPATCH_ID: ${{ github.event.client_payload.dispatch_id }}
-          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
-          SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
+          PRODUCER_RUN_ID: ${{ github.event.client_payload.producer_run_id }}
           EXPECTED_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
         run: |
           set -Eeuo pipefail
@@ -883,53 +1005,48 @@ jobs:
                 || ! "$DISPATCH_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ \
                 || "$DISPATCH_ID" \
                     != "$DISPATCH_RUN_ID-$DISPATCH_RUN_ATTEMPT-recovery" \
-                || ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ \
-                || ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ \
+                || ! "$PRODUCER_RUN_ID" =~ ^[1-9][0-9]*$ \
                 || ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
                 || "$ASSET_INVENTORY" == null \
                 || ! "$EXPECTED_COMMIT" =~ ^(none|[0-9a-f]{64})$ ]]; then
             echo "Invalid recovery dispatch payload" >&2
             exit 64
           fi
-          if [[ "$RELEASE_VERSION" == 2.0.0 ]]; then
-            if [[ "$ASSET_SCHEMA" != legacy-v1 ]]; then
-              echo "v2.0.0 recovery requires legacy-v1" >&2
-              exit 64
-            fi
-          else
-            IFS=. read -r version_major version_minor version_patch \
-              <<< "$RELEASE_VERSION"
-            if [[ "$ASSET_SCHEMA" != bundle-v1 ]] \
-                || (( 10#$version_major < 2 \
-                      || (10#$version_major == 2 && 10#$version_minor == 0 \
-                          && 10#$version_patch < 1) )); then
-              echo "Unsupported recovery asset schema/version pair" >&2
-              exit 64
-            fi
+          IFS=. read -r version_major version_minor _ <<< "$RELEASE_VERSION"
+          if [[ "$ASSET_SCHEMA" != binary-v1 ]] \
+              || (( 10#$version_major < 2 \
+                    || (10#$version_major == 2 && 10#$version_minor < 1) )); then
+            echo "Unsupported recovery asset schema/version pair" >&2
+            exit 64
           fi
+          checked_out_verifier_sha="$(git rev-parse 'HEAD^{commit}')"
           git fetch --force --no-tags origin \
-            "+refs/tags/$RELEASE_TAG:refs/ci/recovery-source"
-          public_source_sha="$(git rev-parse \
-            'refs/ci/recovery-source^{commit}')"
-          remote_tag_type="$(git cat-file -t refs/ci/recovery-source)"
-          remote_tag_sha="$(git rev-parse refs/ci/recovery-source)"
-          if [[ "$remote_tag_type" != commit \
-                || "$remote_tag_sha" != "$public_source_sha" \
-                || "$(wc -w < <(git rev-list --parents -n 1 \
-                    refs/ci/recovery-source))" -ne 1 ]]; then
-            echo "Recovery release tag is not an immutable orphan source snapshot" >&2
+            "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$checked_out_verifier_sha" \
+                != "$(git rev-parse 'refs/remotes/origin/main^{commit}')" ]]; then
+            echo "Recovery verifiers were not checked out from current public main" >&2
             exit 65
           fi
-          source_graph="$(git show refs/ci/recovery-source:SOURCE-GRAPH.txt)"
-          graph_source_sha="$(awk -F= \
-            '$1 == "source_sha" { count++; value=$2 }
-             END { if (count == 1) print value }' <<< "$source_graph")"
-          graph_version="$(awk -F= \
-            '$1 == "version" { count++; value=$2 }
-             END { if (count == 1) print value }' <<< "$source_graph")"
-          if [[ "$graph_source_sha" != "$SOURCE_SHA" \
-                || "v$graph_version" != "$RELEASE_TAG" ]]; then
-            echo "Recovery source tag does not match the dispatched private source" >&2
+          git fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/ci/recovery-distribution"
+          tag_distribution_sha="$(git rev-parse \
+            'refs/ci/recovery-distribution^{commit}')"
+          remote_tag_type="$(git cat-file -t refs/ci/recovery-distribution)"
+          remote_tag_sha="$(git rev-parse refs/ci/recovery-distribution)"
+          if [[ "$remote_tag_type" != commit \
+                || "$remote_tag_sha" != "$tag_distribution_sha" ]] \
+              || ! git merge-base --is-ancestor \
+                  "$tag_distribution_sha" refs/remotes/origin/main; then
+            echo "Recovery release tag is not a source-free public main commit" >&2
+            exit 65
+          fi
+          tag_tree="$(git ls-tree -r --name-only refs/ci/recovery-distribution)"
+          if grep -Eiq '(^|/)(src|tests?|external)(/|$)|\.(c|cpp|cc|cxx|h|hh|hpp|pro|ui|qrc)$|(^|/)CMakeLists\.txt$|(^|/)SOURCE[-_]GRAPH\.txt$' \
+              <<< "$tag_tree" \
+              || grep -Eq \
+                "(^|/)MegaWhisper-$RELEASE_VERSION-source\\.tar\\.zst$|(^|/)MegaWhisper-Source-$RELEASE_VERSION\\.spdx\\.json$" \
+                <<< "$tag_tree"; then
+            echo "Recovery distribution tag contains application source material" >&2
             exit 65
           fi
 
@@ -939,8 +1056,11 @@ jobs:
           is_draft="$(jq -r '.draft' <<< "$release_json")"
           is_prerelease="$(jq -r '.prerelease' <<< "$release_json")"
           release_tag="$(jq -r '.tag_name // empty' <<< "$release_json")"
+          release_target="$(jq -r '.target_commitish // empty' \
+            <<< "$release_json")"
           if [[ "$release_id" != "$RELEASE_ID" \
                 || "$release_tag" != "$RELEASE_TAG" \
+                || "$release_target" != "$tag_distribution_sha" \
                 || "$is_prerelease" != false \
                 || ( "$is_draft" != true && "$is_draft" != false ) \
                 || ( "$OPERATION" == restore && "$is_draft" != false ) ]]; then
@@ -948,13 +1068,8 @@ jobs:
             exit 65
           fi
 
-          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
-            release_list_mode=legacy-release
-          else
-            release_list_mode=release
-          fi
           expected_assets="$(scripts/ci/list-release-assets.sh \
-            "$RELEASE_VERSION" "$release_list_mode")"
+            "$RELEASE_VERSION" release)"
           api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
             | LC_ALL=C sort)"
           api_asset_inventory="$(jq -c '
@@ -969,7 +1084,8 @@ jobs:
           dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
             <<< "$ASSET_INVENTORY")"
           expected_asset_count="$(wc -l <<< "$expected_assets")"
-          if [[ "$api_asset_names" != "$expected_assets" \
+          if [[ "$expected_asset_count" != 10 \
+                || "$api_asset_names" != "$expected_assets" \
                 || "$api_asset_inventory" != "$dispatched_asset_inventory" ]] \
               || ! jq -e --argjson expected_count "$expected_asset_count" '
                 length == $expected_count
@@ -1038,30 +1154,29 @@ jobs:
           scripts/ci/verify-release-signatures.sh \
             release-assets "$RELEASE_VERSION" "$ASSET_SCHEMA" "$fingerprint"
 
+          compliance_root=third-party-compliance-assets
+          mkdir -p "$compliance_root"
+          scripts/ci/release-bundles.sh extract third-party-compliance \
+            "$RELEASE_VERSION" \
+            "release-assets/MegaWhisper-$RELEASE_VERSION-third-party-compliance.tar.zst" \
+            "$compliance_root"
+          if grep -REqI \
+              -e 'SOURCE[-_]GRAPH\.txt' \
+              -e "MegaWhisper-$RELEASE_VERSION-source\\.tar\\.zst" \
+              -e "MegaWhisper-Source-$RELEASE_VERSION\\.spdx\\.json" \
+              -e '(^|["[:space:]])[a-z_]*source[a-z_]*sha["=:]' \
+              -e '/home/(runner|dx)/' \
+              -e '/__w/[^/]+/[^/]+' "$compliance_root"; then
+            echo "Third-party compliance metadata exposes application source identity" >&2
+            exit 65
+          fi
+
           recovery_root=recovery-assets
           mkdir -p "$recovery_root"
-          if [[ "$ASSET_SCHEMA" == bundle-v1 ]]; then
-            scripts/ci/release-bundles.sh extract recovery \
-              "$RELEASE_VERSION" \
-              "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
-              "$recovery_root"
-          else
-            for file_name in \
-              MegaWhisper-flatpak-repo.tar.zst \
-              MegaWhisper-flatpak-repo.tar.zst.asc \
-              MegaWhisper-flatpak-rollback-repo.tar.zst \
-              MegaWhisper-flatpak-rollback-repo.tar.zst.asc \
-              MegaWhisper-pages-site.tar.zst \
-              MegaWhisper-pages-site.tar.zst.asc \
-              MegaWhisper-pages-rollback-site.tar.zst \
-              MegaWhisper-pages-rollback-site.tar.zst.asc \
-              flatpak-pages-recovery.txt \
-              flatpak-pages-recovery.txt.asc \
-              megawhisper-release-key.asc; do
-              install -m 0600 \
-                "release-assets/$file_name" "$recovery_root/$file_name"
-            done
-          fi
+          scripts/ci/release-bundles.sh extract recovery \
+            "$RELEASE_VERSION" \
+            "release-assets/MegaWhisper-$RELEASE_VERSION-recovery.tar.zst" \
+            "$recovery_root"
           metadata_file="$recovery_root/flatpak-pages-recovery.txt"
           declare -A metadata=()
           while IFS='=' read -r key value; do
@@ -1071,10 +1186,10 @@ jobs:
               exit 65
             fi
             case "$key" in
-              format|asset_schema|source_run_id|source_sha|public_source_sha|\
-              release_repository|version|flatpak_commit|archive_sha256|\
-              site_source_sha|site_archive_sha256|rollback_commit|\
-              rollback_archive_sha256|rollback_site_source_sha|\
+              format|asset_schema|producer_run_id|release_repository|version|\
+              flatpak_commit|archive_sha256|distribution_sha|\
+              site_archive_sha256|rollback_commit|\
+              rollback_archive_sha256|rollback_distribution_sha|\
               rollback_site_archive_sha256)
                 metadata[$key]="$value"
                 ;;
@@ -1084,45 +1199,30 @@ jobs:
                 ;;
             esac
           done < "$metadata_file"
-          for key in format source_run_id source_sha public_source_sha \
-            release_repository version flatpak_commit archive_sha256 \
-            site_source_sha site_archive_sha256 rollback_commit \
-            rollback_archive_sha256 rollback_site_source_sha \
+          for key in format asset_schema producer_run_id release_repository \
+            version flatpak_commit archive_sha256 distribution_sha \
+            site_archive_sha256 rollback_commit rollback_archive_sha256 \
+            rollback_distribution_sha \
             rollback_site_archive_sha256; do
             if [[ -z "${metadata[$key]+present}" ]]; then
               echo "Missing recovery metadata field: $key" >&2
               exit 65
             fi
           done
-          if [[ "$ASSET_SCHEMA" == legacy-v1 ]]; then
-            metadata_schema_valid=false
-            if [[ "${metadata[format]}" == 3 \
-                  && -z "${metadata[asset_schema]+present}" \
-                  && "${metadata[version]}" == 2.0.0 ]]; then
-              metadata_schema_valid=true
-            fi
-          else
-            metadata_schema_valid=false
-            if [[ "${metadata[format]}" == 4 \
-                  && "${metadata[asset_schema]-}" == bundle-v1 ]]; then
-              metadata_schema_valid=true
-            fi
-          fi
-          if [[ "$metadata_schema_valid" != true \
-                || "${metadata[source_run_id]}" != "$SOURCE_RUN_ID" \
-                || "${metadata[source_sha]}" != "$SOURCE_SHA" \
-                || "${metadata[public_source_sha]}" != "$public_source_sha" \
+          if [[ "${metadata[format]}" != 5 \
+                || "${metadata[asset_schema]}" != binary-v1 \
+                || "${metadata[producer_run_id]}" != "$PRODUCER_RUN_ID" \
                 || "${metadata[release_repository]}" != "$GITHUB_REPOSITORY" \
                 || "v${metadata[version]}" != "$RELEASE_TAG" \
                 || ! "${metadata[flatpak_commit]}" =~ ^[0-9a-f]{64}$ \
                 || ! "${metadata[archive_sha256]}" =~ ^[0-9a-f]{64}$ \
-                || ! "${metadata[site_source_sha]}" =~ ^[0-9a-f]{40}$ \
+                || "${metadata[distribution_sha]}" != "$tag_distribution_sha" \
                 || ! "${metadata[site_archive_sha256]}" =~ ^[0-9a-f]{64}$ \
                 || ! "${metadata[rollback_commit]}" \
                     =~ ^(none|[0-9a-f]{64})$ \
                 || ! "${metadata[rollback_archive_sha256]}" \
                     =~ ^[0-9a-f]{64}$ \
-                || ! "${metadata[rollback_site_source_sha]}" \
+                || ! "${metadata[rollback_distribution_sha]}" \
                     =~ ^[0-9a-f]{40}$ \
                 || ! "${metadata[rollback_site_archive_sha256]}" \
                     =~ ^[0-9a-f]{64}$ ]]; then
@@ -1137,7 +1237,9 @@ jobs:
             fi
             scripts/ci/verify-pages-recovery.sh \
               "$recovery_root" recovery-repo recovery-site \
-              "$fingerprint" "$SOURCE_RUN_ID" manifest
+              "$fingerprint" "$PRODUCER_RUN_ID" manifest
+            scripts/ci/verify-flatpak-release-repo.sh \
+              recovery-repo stable
             install -m 0644 "$recovery_root/flatpak-pages-recovery.txt" \
               recovery-repo/flatpak-active-state.txt
             install -m 0644 "$recovery_root/flatpak-pages-recovery.txt.asc" \
@@ -1173,6 +1275,13 @@ jobs:
             elif [[ "$rollback_ref" != "$EXPECTED_COMMIT" ]]; then
               echo "Rollback repository does not expose the requested commit" >&2
               exit 65
+            fi
+            if [[ "$EXPECTED_COMMIT" == none ]]; then
+              scripts/ci/verify-flatpak-release-repo.sh \
+                recovery-repo empty
+            else
+              scripts/ci/verify-flatpak-release-repo.sh \
+                recovery-repo stable
             fi
 
             state_root="$(mktemp -d)"

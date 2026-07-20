@@ -2,88 +2,67 @@
 
 Author: [DXVSI](https://github.com/DXVSI)
 
-MegaWhisper is a Linux desktop application for local and OpenAI-powered speech transcription. It records through Qt Multimedia, runs local inference through `whisper.cpp`, and keeps output delivery explicit and auditable.
+MegaWhisper is a proprietary Linux desktop application for local and OpenAI-compatible speech transcription. It records through Qt Multimedia, runs local inference through `whisper.cpp`, and keeps output delivery explicit.
 
 ## Features
 
-- Local offline transcription with verified, revision-pinned GGML models
+- Local offline transcription with verified GGML models
 - Vulkan acceleration with an automatic CPU fallback
-- OpenAI file transcription with bounded, cost-aware retries
+- OpenAI-compatible file transcription
 - Dictation, long-note, and cloud meeting modes
-- Speaker-labelled segments with `gpt-4o-transcribe-diarize`
+- Speaker-labelled segments with supported diarization models
 - Editable raw, translated, and user-created result variants
-- Private SQLite history with `session`, `text`, and `audio` retention policies
-- Global Shortcuts portal in Flatpak, AppImage, and native builds
-- Three explicit output modes: clipboard-only by default, confirmation-based insertion with a second global shortcut, and one automatic insertion attempt immediately after transcription; both beta insertion modes keep the exact text in the clipboard and fail closed
+- Private SQLite history with configurable audio retention
+- Global Shortcuts portal support in Flatpak and AppImage packages
+- Clipboard-first output with explicit confirmation or automatic insertion modes
 - Russian and English user interfaces
 
-MegaWhisper does not require root, input-device access, udev rules, an `input` group membership, or a privileged input daemon.
+MegaWhisper does not require root, direct input-device access, udev rules, membership in the `input` group, or a privileged input daemon.
 
 ## Installation
 
-Flatpak is the primary distribution format for traditional and immutable Linux systems, subject to compatibility with the system's desktop portal implementation. After a stable release is published, download its signed `.flatpakref` from GitHub Release:
+Flatpak is the recommended package. Install the signed reference from the latest release:
 
 ```fish
-flatpak install -y --user ./io.github.dxvsi.megawhisper.flatpakref
+flatpak install -y --user https://dxvsi.github.io/MegaWhisper/io.github.dxvsi.megawhisper.flatpakref
 flatpak run io.github.dxvsi.megawhisper
 ```
 
-The files under `flatpak/*.in` in a source checkout are release-pipeline templates with unresolved repository URL and GPG key placeholders. They cannot be opened, installed, or made valid by renaming. Use the signed `.flatpakref` from a GitHub Release.
-
-The public `main` branch contains the protected distribution workflow and verification files. Complete source snapshots are published as orphan release tags and signed source archives. To build the exact v2.0.1 source tag for the current user, run:
+The latest release also provides a portable x86_64 AppImage. Download it from the [latest release](https://github.com/DXVSI/MegaWhisper/releases/latest), then run:
 
 ```fish
-git clone https://github.com/DXVSI/MegaWhisper.git
-cd MegaWhisper
-git checkout v2.0.1
-scripts/install-local-flatpak.sh 2.0.1
-flatpak run io.github.dxvsi.megawhisper.Devel
+chmod +x ./MegaWhisper-2.1.0-x86_64.AppImage
+./MegaWhisper-2.1.0-x86_64.AppImage --install-desktop-integration
+./MegaWhisper-2.1.0-x86_64.AppImage --check-desktop-integration
+./MegaWhisper-2.1.0-x86_64.AppImage
 ```
 
-The installer uses an isolated temporary Flatpak build environment and the separate `io.github.dxvsi.megawhisper.Devel` app ID, so it does not replace a stable installation.
+Portable startup and button-driven operation work without installation. Global Shortcuts and system insertion require the explicit per-user desktop integration shown above. Reinstall it after moving the AppImage because the integration verifies its exact path.
 
-After publication, the release also provides a portable AppImage:
-
-```fish
-chmod +x ./MegaWhisper-2.0.1-x86_64.AppImage
-./MegaWhisper-2.0.1-x86_64.AppImage --install-desktop-integration
-./MegaWhisper-2.0.1-x86_64.AppImage --check-desktop-integration
-./MegaWhisper-2.0.1-x86_64.AppImage
-```
-
-Portable startup and button-driven operation work without installation. Global Shortcuts and system insertion require the explicit per-user desktop integration above. Reinstall it after moving the AppImage because the exact path is verified. `--remove-desktop-integration` removes only files owned by this AppImage integration.
-
-The AppImage uses the Qt GStreamer backend for `QAudioSource` and `QAudioSink`, with its required scanner and plugins. History FLAC is decoded directly through libFLAC without `QMediaPlayer/GstPlay`. Qt FFmpeg and OpenH264 are intentionally excluded. Its license inventory and corresponding-source archives cover bundled libraries, the AppImage runtime, and compiled header-only dependencies including `spirv-headers` and `vulkan-devel`. A clean installation remains clipboard-only. Confirmation-based beta insertion waits for a second global shortcut in the target window. Automatic beta insertion needs no second shortcut and makes exactly one immediate attempt in the window that is active when transcription completes. Both modes keep the text in the clipboard first, require a neutral modifier state, and use Remote Desktop portal with `libei`; the default profile sends `Shift+Insert`. `attempted` records a send attempt, not a proven edit. A denied, revoked, unavailable, busy, or timed-out backend leaves the exact text in the clipboard with no delayed retry. Compatibility with specific target applications remains subject to the manual desktop matrix.
-
-See [INSTALL.md](INSTALL.md) for signature verification, updates, rollback, offline bundle installation, and source builds.
+See [INSTALL.md](INSTALL.md) for signature verification, updates, rollback, and package diagnostics.
 
 ## Privacy
 
-Local mode does not send audio to a network service. Cloud mode displays an explicit disclosure and sends only the selected recording, language, model, and prompt required for that job. The API key is stored through a protected credential backend and is never written to plaintext settings.
+Local mode does not send audio to a network service. Cloud mode displays an explicit disclosure and sends only the selected recording and job parameters to the configured service. API credentials are stored through the protected credential backend and are not written to plaintext settings.
 
 Audio retention is opt-in. Session audio is removed when the application closes. Text-only mode keeps only a bounded temporary retry copy and does not restore it after restart.
 
-The provisional local default is the Balanced `whisper-large-v3-turbo-q5_0` profile. It is a runtime convenience, not a quality claim; final model guidance remains gated by real WER/CER, latency, RAM, and VRAM measurements.
+## Release verification
 
-## Build and verification
+MegaWhisper 2.1.0 and later use the `binary-v1` release contract. A release contains exactly ten uploaded assets: AppImage, AppImage zsync metadata, Flatpak bundle, two Flatpak repository descriptors, a third-party compliance bundle, a recovery bundle, the public release key, `SHA256SUMS`, and its detached signature.
 
-The project uses Qt 6 Widgets, qmake, Qt Multimedia, `whisper.cpp`, SQLite, FLAC, libsamplerate, `libei`, and libxkbcommon. History playback decodes FLAC off the GUI thread, converts canonical PCM to the selected output format, and streams it through `QAudioSink`; stop, replay, device loss, and shutdown do not retain a `GstPlay` worker. The Flatpak ships a full app-local Qt Multimedia 6.11.1 module with exact upstream backports for QTBUG-147011 and the PipeWire core-hook race fixed by commit `4ee738562`, until the KDE runtime publishes Qt 6.11.2 or newer. Production uses the sandboxed PulseAudio compatibility socket, which is provided by PipeWire Pulse on common modern desktops. CI separately exercises active `QAudioSource` and `QAudioSink` teardown through that compatibility backend and 25 independent temporary direct PipeWire processes, without granting direct PipeWire access to the installed application. CI builds CPU and Vulkan native variants, Flatpak, and an openSUSE-baseline AppImage. A `v2.0.1` release has exactly 11 uploaded assets: installers and repository descriptors remain directly visible, while SBOMs, provenance, notices, corresponding sources, and signed Pages recovery states are grouped into deterministic compliance and recovery bundles. One signed `SHA256SUMS` authenticates all payload assets. The public workflow verifies the candidate website and Flatpak repository locally, including a clean install and smoke test, then publishes one complete Pages tree containing the site and exactly one OSTree state. It verifies the live HTTPS bytes and signed `.flatpakref` before publishing the draft Release. A failed post-deployment check restores the complete previous signed Pages state; the first-release fallback exposes a signed empty repository and disables the install action.
+The signed checksum list authenticates all eight payload assets. The public workflow verifies exact GitHub asset IDs, sizes and SHA-256 digests, installs the candidate Flatpak, deploys the signed Pages repository, checks the live HTTPS bytes, and only then publishes the draft Release. If the first deployment fails, the signed recovery state exposes an empty Flatpak repository and disables installation instead of publishing an unverified release.
 
-```fish
-git checkout v2.0.1
-git submodule update --init --recursive
-set -x SOURCE_DATE_EPOCH (git log -1 --format=%ct)
-scripts/ci/build-native.sh 2.0.1 1 development
-env QT_QPA_PLATFORM=offscreen ./run-megawhisper.sh --smoke-test
-env QT_QPA_PLATFORM=offscreen ./run-megawhisper.sh --ui-smoke-test
-scripts/install-development-desktop.sh install
-scripts/install-development-desktop.sh check
-```
+The public `main` branch and release tag contain only distribution documentation, the website, and verification tooling. GitHub-generated source archives therefore do not contain the MegaWhisper application source code.
 
-The native launcher verifies a deterministic content fingerprint and exact package identity, and refuses to run a missing, corrupt, or stale local build. Smoke commands do not require desktop integration. Normal native development startup uses `io.github.dxvsi.megawhisper.NativeDevel`, which is distinct from the `io.github.dxvsi.megawhisper.Devel` Flatpak identity, and requires the explicit integration command above. Rebuilding and installation are always explicit.
+## Third-party software
 
-The quality runner supports score-only WER/CER reports and real local inference over a separately supplied legal corpus. No private evaluation audio is committed.
+MegaWhisper includes third-party components under their own licenses, including Qt, GStreamer and `whisper.cpp`. The release asset `MegaWhisper-VERSION-third-party-compliance.tar.zst` contains binary SBOMs, build provenance, notices, license information, and corresponding source required for bundled third-party components. It does not contain the MegaWhisper application source code.
+
+See [Third-party notices](THIRD_PARTY_NOTICES.md) for the canonical notice summary.
 
 ## License
 
-MegaWhisper is licensed under GPL-3.0-only. Third-party licenses and corresponding-source artifacts are included with release packages.
+MegaWhisper 2.1.0 and later are proprietary software. Installation and use of official, unmodified binaries are permitted under the terms in [LICENSE](LICENSE). No right to the application source code, modification, redistribution, or sublicensing is granted.
+
+Third-party components remain governed by their respective licenses.
