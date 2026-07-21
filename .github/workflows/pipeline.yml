@@ -1,13 +1,12 @@
 name: MegaWhisper public distribution
 
 run-name: >-
-  MegaWhisper
-  ${{ github.event.client_payload.release_payload.tag
-      || github.event.client_payload.tag }}
-  ${{ github.event.client_payload.operation }}
-  dispatch
-  ${{ github.event.client_payload.release_payload.dispatch_id
-      || github.event.client_payload.dispatch_id }}
+  ${{ format('MegaWhisper {0} {1} dispatch {2}',
+      github.event.client_payload.release_payload.tag
+        || github.event.client_payload.tag,
+      github.event.client_payload.operation,
+      github.event.client_payload.release_payload.dispatch_id
+        || github.event.client_payload.dispatch_id) }}
 
 on:
   repository_dispatch:
@@ -212,7 +211,7 @@ jobs:
             "$RELEASE_VERSION" release)"
           api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
             | LC_ALL=C sort)"
-          api_asset_inventory="$(jq -c '
+          api_asset_inventory="$(jq -Sc '
             [.assets[]
               | {
                   id: .id,
@@ -225,7 +224,7 @@ jobs:
             echo "Public release API inventory does not match $ASSET_SCHEMA" >&2
             exit 65
           fi
-          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+          dispatched_asset_inventory="$(jq -Sc 'sort_by(.name)' \
             <<< "$ASSET_INVENTORY")"
           if [[ "$dispatched_asset_inventory" != "$api_asset_inventory" ]] \
               || ! jq -e '
@@ -659,7 +658,7 @@ jobs:
             echo "Public release returned invalid state types" >&2
             exit 65
           fi
-          current_asset_inventory="$(jq -c '
+          current_asset_inventory="$(jq -Sc '
             [.assets[]
               | {
                   id: .id,
@@ -668,7 +667,7 @@ jobs:
                   digest: .digest
                 }
             ] | sort_by(.name)' <<< "$release_json")"
-          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+          dispatched_asset_inventory="$(jq -Sc 'sort_by(.name)' \
             <<< "$ASSET_INVENTORY")"
           if [[ "$current_asset_inventory" \
                   != "$dispatched_asset_inventory" ]] \
@@ -748,7 +747,7 @@ jobs:
                   and has("prerelease")
                   and ((.prerelease | type) == "boolean")
                 ' <<< "$observed_release" >/dev/null; then
-              observed_asset_inventory="$(jq -c '
+              observed_asset_inventory="$(jq -Sc '
                 [.assets[]
                   | {
                       id: .id,
@@ -815,7 +814,7 @@ jobs:
             echo "Public release ID is invalid" >&2
             exit 65
           fi
-          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+          dispatched_asset_inventory="$(jq -Sc 'sort_by(.name)' \
             <<< "$ASSET_INVENTORY")"
           exact_release="$(gh api \
             "repos/$GITHUB_REPOSITORY/releases/$release_id")"
@@ -833,7 +832,7 @@ jobs:
             echo "Published release identity changed before latest reconciliation" >&2
             exit 65
           fi
-          exact_asset_inventory="$(jq -c '
+          exact_asset_inventory="$(jq -Sc '
             [.assets[]
               | {
                   id: .id,
@@ -896,7 +895,7 @@ jobs:
                   and .prerelease == false
                   and (.assets | length) == 10
                 ' <<< "$latest_release" >/dev/null; then
-              latest_asset_inventory="$(jq -c '
+              latest_asset_inventory="$(jq -Sc '
                 [.assets[]
                   | {
                       id: .id,
@@ -1072,7 +1071,7 @@ jobs:
             "$RELEASE_VERSION" release)"
           api_asset_names="$(jq -r '.assets[].name' <<< "$release_json" \
             | LC_ALL=C sort)"
-          api_asset_inventory="$(jq -c '
+          api_asset_inventory="$(jq -Sc '
             [.assets[]
               | {
                   id: .id,
@@ -1081,7 +1080,7 @@ jobs:
                   digest: .digest
                 }
             ] | sort_by(.name)' <<< "$release_json")"
-          dispatched_asset_inventory="$(jq -c 'sort_by(.name)' \
+          dispatched_asset_inventory="$(jq -Sc 'sort_by(.name)' \
             <<< "$ASSET_INVENTORY")"
           expected_asset_count="$(wc -l <<< "$expected_assets")"
           if [[ "$expected_asset_count" != 10 \
