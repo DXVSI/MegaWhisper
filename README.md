@@ -31,10 +31,10 @@ flatpak run io.github.dxvsi.megawhisper
 The latest release also provides a portable x86_64 AppImage. Download it from the [latest release](https://github.com/DXVSI/MegaWhisper/releases/latest), then run:
 
 ```fish
-chmod +x ./MegaWhisper-2.1.0-x86_64.AppImage
-./MegaWhisper-2.1.0-x86_64.AppImage --install-desktop-integration
-./MegaWhisper-2.1.0-x86_64.AppImage --check-desktop-integration
-./MegaWhisper-2.1.0-x86_64.AppImage
+chmod +x ./MegaWhisper-2.1.1-x86_64.AppImage
+./MegaWhisper-2.1.1-x86_64.AppImage --install-desktop-integration
+./MegaWhisper-2.1.1-x86_64.AppImage --check-desktop-integration
+./MegaWhisper-2.1.1-x86_64.AppImage
 ```
 
 Portable startup and button-driven operation work without installation. Global Shortcuts and system insertion require the explicit per-user desktop integration shown above. Reinstall it after moving the AppImage because the integration verifies its exact path.

@@ -34,6 +34,7 @@ readonly -a strict_required_files=(
     assets/site.js
     assets/icon-recording.svg
     assets/icon.svg
+    assets/megawhisper-social-icon-v2.png
     img/history.png
     img/main.png
     img/settings-audio.png
@@ -101,6 +102,7 @@ if [[ "$validation_mode" == strict ]]; then
     if find "$site_dir/assets" -mindepth 1 -maxdepth 1 \
         ! -name icon-recording.svg \
         ! -name icon.svg \
+        ! -name megawhisper-social-icon-v2.png \
         ! -name site.css \
         ! -name site.js \
         -print -quit | grep -q .; then
@@ -206,6 +208,16 @@ if [[ "$validation_mode" == strict ]]; then
     grep -Fq 'assets/site.css' "$index_file"
     grep -Fq 'assets/site.js' "$index_file"
     grep -Fq \
+        '<meta property="og:image" content="https://dxvsi.github.io/MegaWhisper/assets/megawhisper-social-icon-v2.png">' \
+        "$index_file"
+    grep -Fq '<meta property="og:image:type" content="image/png">' "$index_file"
+    grep -Fq '<meta property="og:image:width" content="512">' "$index_file"
+    grep -Fq '<meta property="og:image:height" content="512">' "$index_file"
+    grep -Fq '<meta name="twitter:card" content="summary">' "$index_file"
+    grep -Fq \
+        '<meta name="twitter:image" content="https://dxvsi.github.io/MegaWhisper/assets/megawhisper-social-icon-v2.png">' \
+        "$index_file"
+    grep -Fq \
         'https://dxvsi.github.io/MegaWhisper/io.github.dxvsi.megawhisper.flatpakref' \
         "$index_file"
     if grep -Eiq 'GPL-3\.0|open[- ]source|source snapshots?' "$index_file"; then
@@ -256,6 +268,19 @@ if [[ "$validation_mode" == strict ]]; then
     )
 
     node --check "$site_dir/assets/site.js"
+    node - "$site_dir/assets/megawhisper-social-icon-v2.png" <<'NODE'
+const fs = require("node:fs");
+const image = fs.readFileSync(process.argv[2]);
+const valid = image.length >= 24
+  && image.subarray(0, 8).toString("hex") === "89504e470d0a1a0a"
+  && image.subarray(12, 16).toString("ascii") === "IHDR"
+  && image.readUInt32BE(16) === 512
+  && image.readUInt32BE(20) === 512;
+if (!valid) {
+  console.error("social preview image must be a 512x512 PNG");
+  process.exit(65);
+}
+NODE
     xmllint --noout "$site_dir/sitemap.xml"
     xmllint --noout "$site_dir/assets/icon.svg"
     xmllint --noout "$site_dir/assets/icon-recording.svg"

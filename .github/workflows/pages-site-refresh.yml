@@ -1,0 +1,205 @@
+name: MegaWhisper Pages site refresh
+
+run-name: >-
+  MegaWhisper ${{ inputs.release_tag }} Pages site refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published stable release providing the signed Flatpak state
+        required: true
+        type: string
+        default: v2.1.1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: megawhisper-public-distribution
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: https://dxvsi.github.io/MegaWhisper/
+    env:
+      FLATPAK_REPO_URL: https://dxvsi.github.io/MegaWhisper
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Checkout protected public main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          submodules: false
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the exact public main revision
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$GITHUB_REPOSITORY" != DXVSI/MegaWhisper \
+                || "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "Pages site refresh must run from public main" >&2
+            exit 65
+          fi
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git rev-parse 'HEAD^{commit}')" \
+                != "$(git rev-parse 'refs/remotes/origin/main^{commit}')" ]]; then
+            echo "Checked-out site refresh revision is not current public main" >&2
+            exit 65
+          fi
+
+      - name: Install Pages verification tooling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl flatpak gnupg jq libxml2-utils ostree zstd
+
+      - id: state
+        name: Verify signed baseline and stage the desired Pages state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          fingerprint="$(tr -d '[:space:]' < RELEASE_KEY_FINGERPRINT)"
+          refresh_root="$RUNNER_TEMP/pages-site-refresh"
+          scripts/ci/prepare-pages-site-refresh.sh \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$FLATPAK_REPO_URL" \
+            "$fingerprint" site img "$refresh_root"
+          cat "$refresh_root/refresh-state.env" >> "$GITHUB_OUTPUT"
+
+      - name: Recheck public main before deployment
+        if: steps.state.outputs.mode == 'deploy'
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ steps.state.outputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Staged site refresh source identity is invalid" >&2
+            exit 65
+          fi
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git rev-parse 'refs/remotes/origin/main^{commit}')" \
+                != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "Public main moved after the site refresh was staged" >&2
+            exit 65
+          fi
+
+      - name: Configure public GitHub Pages
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload signed baseline Pages state
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: pages-site-refresh-baseline-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pages-site-refresh/baseline-pages
+          include-hidden-files: true
+
+      - name: Upload desired Pages state
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: pages-site-refresh-desired-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pages-site-refresh/desired-pages
+          include-hidden-files: true
+
+      - id: deployment
+        name: Deploy refreshed site with the unchanged Flatpak repository
+        if: steps.state.outputs.mode == 'deploy'
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: pages-site-refresh-desired-${{ github.run_attempt }}
+
+      - name: Verify refreshed or already-current live Pages state
+        if: >-
+          ${{ steps.state.outputs.mode == 'deploy'
+              || steps.state.outputs.mode == 'reconciled' }}
+        shell: bash
+        env:
+          FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
+          FLATPAK_COMMIT: ${{ steps.state.outputs.flatpak_commit }}
+        run: |
+          set -Eeuo pipefail
+          pages_verified=0
+          deadline=$((SECONDS + 180))
+          for attempt in $(seq 1 12); do
+            echo "Checking refreshed Pages state, attempt $attempt of 12"
+            if scripts/ci/verify-live-pages-state.sh \
+                "$FLATPAK_REPO_URL" \
+                "$RUNNER_TEMP/pages-site-refresh/desired-pages" \
+                "$RUNNER_TEMP/pages-site-refresh/desired-site" \
+                "$FINGERPRINT" "$FLATPAK_COMMIT" \
+                "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-refresh-$attempt" \
+                release; then
+              pages_verified=1
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$pages_verified" -ne 1 ]]; then
+            echo "Live Pages state differs from the staged site refresh" >&2
+            exit 65
+          fi
+
+      - id: rollback-deployment
+        name: Restore the signed baseline after a failed deployment
+        if: >-
+          ${{ failure()
+              && steps.state.outputs.mode == 'deploy'
+              && (steps.deployment.outcome == 'success'
+                  || steps.deployment.outcome == 'failure') }}
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: pages-site-refresh-baseline-${{ github.run_attempt }}
+
+      - name: Verify automatic signed-baseline rollback
+        if: ${{ failure() && steps.rollback-deployment.outcome == 'success' }}
+        shell: bash
+        env:
+          FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
+          FLATPAK_COMMIT: ${{ steps.state.outputs.flatpak_commit }}
+        run: |
+          set -Eeuo pipefail
+          rollback_verified=0
+          deadline=$((SECONDS + 180))
+          for attempt in $(seq 1 12); do
+            echo "Checking signed baseline rollback, attempt $attempt of 12"
+            if scripts/ci/verify-live-pages-state.sh \
+                "$FLATPAK_REPO_URL" \
+                "$RUNNER_TEMP/pages-site-refresh/baseline-pages" \
+                "$RUNNER_TEMP/pages-site-refresh/baseline-site" \
+                "$FINGERPRINT" "$FLATPAK_COMMIT" \
+                "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-rollback-$attempt" \
+                release; then
+              rollback_verified=1
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$rollback_verified" -ne 1 ]]; then
+            echo "Automatic rollback did not restore the signed baseline" >&2
+            exit 65
+          fi
