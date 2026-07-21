@@ -83,7 +83,7 @@ Telegram caches link previews. After a successful deployment, refresh `https://d
 
 ## Implementation status
 
-Implemented locally on `fix/site-preview-icon` without committing, pushing, or changing external state:
+Implemented through [public PR #10](https://github.com/DXVSI/MegaWhisper/pull/10):
 
 - Added the Pages-only workflow and deterministic staging helpers.
 - Added immutable release asset, checksum, signature, recovery, site, and Flatpak verification.
@@ -92,4 +92,6 @@ Implemented locally on `fix/site-preview-icon` without committing, pushing, or c
 - Added the social PNG and exact metadata validation.
 - Translated the public installation guide to English.
 
-Local end-to-end verification against the real published v2.1.1 recovery bundle succeeded. The reconstructed signed baseline matches the current live Pages state, including the signed Flatpak static delta and commit `ed00fa4052fdb2860dc7783c56a1f48add4d0615719e33a0d2f6bec778fa7d07`. The staged result correctly selected `mode=deploy`. External deployment remains pending until the changes are reviewed, committed, merged through the protected public branch, and manually dispatched.
+Local end-to-end verification against the real published v2.1.1 recovery bundle succeeded. The reconstructed signed baseline matched the previous live Pages state, including the signed Flatpak static delta and commit `ed00fa4052fdb2860dc7783c56a1f48add4d0615719e33a0d2f6bec778fa7d07`.
+
+[Pages refresh run 29816200635](https://github.com/DXVSI/MegaWhisper/actions/runs/29816200635) completed successfully in 57 seconds without application build jobs or rollback. Independent live verification confirmed HTTP 200 for the page and 512x512 PNG, exact deployed icon bytes and social metadata, version 2.1.1, and the unchanged Flatpak commit.
