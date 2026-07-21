@@ -382,7 +382,7 @@ jobs:
             cd "$binary_scan_root/appimage"
             "$appimage_asset" --appimage-extract >/dev/null
           )
-          ostree --repo=candidate-repo checkout \
+          ostree checkout -U --repo=candidate-repo \
             "$EXPECTED_FLATPAK_COMMIT" "$binary_scan_root/flatpak"
           scripts/ci/verify-binary-release-content.sh \
             "$RELEASE_VERSION" release-assets \
