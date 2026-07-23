@@ -38,10 +38,10 @@ Replace `COMMIT` with a value shown by `flatpak remote-info --log`.
 
 ### Flatpak bundle
 
-The `MegaWhisper-2.1.1-x86_64.flatpak` file can be installed directly:
+The `MegaWhisper-2.2.0-x86_64.flatpak` file can be installed directly:
 
 ```fish
-flatpak install -y --user ./MegaWhisper-2.1.1-x86_64.flatpak
+flatpak install -y --user ./MegaWhisper-2.2.0-x86_64.flatpak
 ```
 
 The bundle contains the URL of the signed update remote. It does not contain the KDE runtime itself, but its `RuntimeRepo` entry allows Flatpak to download the runtime from Flathub. The runtime must be provided separately for a completely offline installation.
@@ -51,12 +51,12 @@ The bundle contains the URL of the signed update remote. It does not contain the
 Download the AppImage from the [latest release](https://github.com/DXVSI/MegaWhisper/releases/latest), then run:
 
 ```fish
-chmod +x ./MegaWhisper-2.1.1-x86_64.AppImage
-./MegaWhisper-2.1.1-x86_64.AppImage --appimage-updateinformation
-env QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 ./MegaWhisper-2.1.1-x86_64.AppImage --smoke-test
-./MegaWhisper-2.1.1-x86_64.AppImage --install-desktop-integration
-./MegaWhisper-2.1.1-x86_64.AppImage --check-desktop-integration
-./MegaWhisper-2.1.1-x86_64.AppImage
+chmod +x ./MegaWhisper-2.2.0-x86_64.AppImage
+./MegaWhisper-2.2.0-x86_64.AppImage --appimage-updateinformation
+env QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 ./MegaWhisper-2.2.0-x86_64.AppImage --smoke-test
+./MegaWhisper-2.2.0-x86_64.AppImage --install-desktop-integration
+./MegaWhisper-2.2.0-x86_64.AppImage --check-desktop-integration
+./MegaWhisper-2.2.0-x86_64.AppImage
 ```
 
 Button-driven use works without installation. The Global Shortcuts portal and system insertion require explicit desktop integration in the user's XDG directories. Run `--install-desktop-integration` again after moving the AppImage because the desktop entry is bound to its exact absolute path.
@@ -64,13 +64,13 @@ Button-driven use works without installation. The Global Shortcuts portal and sy
 Remove the desktop integration files with:
 
 ```fish
-./MegaWhisper-2.1.1-x86_64.AppImage --remove-desktop-integration
+./MegaWhisper-2.2.0-x86_64.AppImage --remove-desktop-integration
 ```
 
 If FUSE is unavailable, use:
 
 ```fish
-env APPIMAGE_EXTRACT_AND_RUN=1 ./MegaWhisper-2.1.1-x86_64.AppImage
+env APPIMAGE_EXTRACT_AND_RUN=1 ./MegaWhisper-2.2.0-x86_64.AppImage
 ```
 
 ## Verify release signatures
@@ -88,20 +88,20 @@ gpg --verify ./SHA256SUMS.asc ./SHA256SUMS
 sha256sum --check ./SHA256SUMS
 ```
 
-Expected payload assets for v2.1.1:
+Expected payload assets for v2.2.0:
 
-- `MegaWhisper-2.1.1-x86_64.AppImage`
-- `MegaWhisper-2.1.1-x86_64.AppImage.zsync`
-- `MegaWhisper-2.1.1-x86_64.flatpak`
+- `MegaWhisper-2.2.0-x86_64.AppImage`
+- `MegaWhisper-2.2.0-x86_64.AppImage.zsync`
+- `MegaWhisper-2.2.0-x86_64.flatpak`
 - `io.github.dxvsi.megawhisper.flatpakref`
 - `io.github.dxvsi.megawhisper.flatpakrepo`
-- `MegaWhisper-2.1.1-third-party-compliance.tar.zst`
-- `MegaWhisper-2.1.1-recovery.tar.zst`
+- `MegaWhisper-2.2.0-third-party-compliance.tar.zst`
+- `MegaWhisper-2.2.0-recovery.tar.zst`
 - `megawhisper-release-key.asc`
 
 ## Third-party compliance
 
-`MegaWhisper-2.1.1-third-party-compliance.tar.zst` contains binary SBOMs, build provenance, notices, license inventories, and corresponding source required for bundled third-party components. It does not contain MegaWhisper application source code.
+`MegaWhisper-2.2.0-third-party-compliance.tar.zst` contains binary SBOMs, build provenance, notices, license inventories, and corresponding source required for bundled third-party components. It does not contain MegaWhisper application source code.
 
 Qt, GStreamer, `whisper.cpp`, the AppImage runtime, and other third-party components remain under their respective licenses. The canonical summary is published in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
