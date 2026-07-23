@@ -103,24 +103,21 @@
 
   <main id="main">
     <section id="top" class="hero section">
-      <div class="hero-rules" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </div>
       <div class="shell hero-grid">
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="record-dot" aria-hidden="true"></span>
-            <span data-ru="Голосовой инструмент для рабочего стола">A voice tool for your desktop</span>
+            <span data-ru="Локальная диктовка для Linux">Local-first dictation for Linux</span>
           </p>
           <h1>
-            <span data-ru="Говорите.">Speak.</span>
-            <span class="title-accent" data-ru="Текст остается под вашим контролем.">Keep the text under your control.</span>
+            <span data-ru="Голос в текст.">Voice to text.</span>
+            <span class="title-accent" data-ru="Без потери контроля.">Without giving up control.</span>
           </h1>
           <p
             class="hero-lead"
-            data-ru="MegaWhisper превращает речь в текст прямо на Linux. Работайте полностью локально или подключите OpenAI-совместимый сервер, затем копируйте либо вставляйте результат выбранным способом.">
-            MegaWhisper turns speech into text on Linux. Work fully offline or connect an
-            OpenAI-compatible server, then copy or insert the result using an explicit output mode.
+            data-ru="Используйте одну комбинацию клавиш для диктовки в любом месте Linux. Запускайте Whisper или Parakeet локально на CPU и Vulkan либо подключите OpenAI-совместимый endpoint.">
+            Use one shortcut to dictate anywhere on Linux. Run Whisper or Parakeet locally on
+            CPU and Vulkan, or connect an OpenAI-compatible endpoint.
           </p>
 
           <div class="hero-actions">
@@ -140,35 +137,30 @@
             </a>
           </div>
 
-          <ul class="hero-facts" aria-label="Product facts">
+          <ul
+            class="hero-capabilities"
+            aria-label="Transcription paths"
+            data-aria-ru="Варианты транскрибации">
             <li>
-              <span class="fact-key">01</span>
-              <span data-ru="Локально без сети">Local without a network</span>
+              <span class="capability-key" data-ru="ЛОКАЛЬНО">LOCAL</span>
+              <strong>Whisper + Parakeet</strong>
             </li>
             <li>
-              <span class="fact-key">02</span>
-              <span data-ru="Flatpak с desktop portal">Flatpak with desktop portals</span>
+              <span class="capability-key" data-ru="ВЫЧИСЛЕНИЯ">COMPUTE</span>
+              <strong>CPU + Vulkan</strong>
             </li>
             <li>
-              <span class="fact-key">03</span>
-              <span data-ru="Проприетарная лицензия">Proprietary license</span>
+              <span class="capability-key" data-ru="ОБЛАКО">CLOUD</span>
+              <strong>OpenAI-compatible</strong>
             </li>
           </ul>
         </div>
 
-        <div class="hero-stage">
-          <div class="stage-index" aria-hidden="true">MW / 02.10</div>
-          <div class="app-window">
-            <div class="app-titlebar">
-              <div class="window-identity">
-                <img src="assets/icon.svg" width="24" height="24" alt="">
-                <span>MegaWhisper</span>
-              </div>
-              <div class="window-controls" aria-hidden="true">
-                <span></span><span></span><span></span>
-              </div>
-            </div>
-            <div class="app-surface">
+        <figure class="hero-product">
+          <div class="product-frame">
+            <div class="product-corner product-corner-top" aria-hidden="true"></div>
+            <div class="product-corner product-corner-bottom" aria-hidden="true"></div>
+            <div class="product-image">
               <img
                 src="img/main.png"
                 width="1400"
@@ -176,22 +168,15 @@
                 alt="Current MegaWhisper Qt Quick home page"
                 data-alt-ru="Текущая главная страница MegaWhisper на Qt Quick">
             </div>
-            <div class="signal-overlay" aria-hidden="true">
-              <span></span><span></span><span></span><span></span><span></span>
-              <span></span><span></span><span></span><span></span><span></span>
-              <span></span><span></span><span></span><span></span><span></span>
-              <span></span><span></span><span></span>
-            </div>
           </div>
-          <div class="stage-note note-local">
-            <span class="note-code">LOCAL</span>
-            <strong data-ru="Аудио остается на устройстве">Audio stays on-device</strong>
-          </div>
-          <div class="stage-note note-output">
-            <span class="note-code">REC STATE</span>
-            <strong data-ru="Красный индикатор появляется в tray">Red indicator appears in the tray</strong>
-          </div>
-        </div>
+          <figcaption class="product-caption">
+            <span class="product-caption-primary">
+              <i aria-hidden="true"></i>
+              <span data-ru="Текущий интерфейс Qt Quick">Current Qt Quick interface</span>
+            </span>
+            <span data-ru="Локальные и облачные сценарии">Local and cloud workflows</span>
+          </figcaption>
+        </figure>
       </div>
     </section>
 
@@ -685,7 +670,9 @@
           <div class="project-links">
             <a href="https://github.com/DXVSI/MegaWhisper" data-ru="Репозиторий">Repository</a>
             <a href="https://github.com/DXVSI/MegaWhisper/releases" data-ru="Релизы">Releases</a>
-            <a href="https://github.com/DXVSI/MegaWhisper/blob/main/LICENSE" data-ru="Лицензия">License</a>
+            <a
+              href="https://github.com/DXVSI/MegaWhisper/blob/main/LICENSE"
+              data-ru="Проприетарная лицензия">Proprietary license</a>
             <a href="https://github.com/DXVSI/MegaWhisper/blob/main/THIRD_PARTY_NOTICES.md" data-ru="Сторонние компоненты">Third-party notices</a>
             <a href="https://github.com/DXVSI/MegaWhisper/issues" data-ru="Сообщить о проблеме">Report an issue</a>
           </div>
