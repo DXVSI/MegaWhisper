@@ -111,7 +111,12 @@ if find "$site_dir" -type l -print -quit | grep -q .; then
     echo "site must not contain symbolic links" >&2
     exit 65
 fi
-if [[ "$mode" == release ]]; then
+# Historic signed recovery archives are verified in manifest mode. They must
+# remain usable as an exact rollback baseline even after the tracked site gains
+# new presentation requirements. The desired site is always checked in strict
+# mode before its manifest is generated, so current gallery policy belongs to
+# that strict boundary.
+if [[ "$mode" == release && "$validation_mode" == strict ]]; then
     readonly -a current_qt_quick_alt_text=(
         'alt="Current MegaWhisper Qt Quick home page"'
         'alt="Current MegaWhisper Qt Quick history page with local result variants and export controls"'

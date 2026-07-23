@@ -272,6 +272,80 @@ install -m 0644 "$work_dir/recovery/megawhisper-release-key.asc" \
     "$work_dir/baseline-site" "$work_dir/baseline-repo" \
     "$work_dir/baseline-pages" "$flatpak_commit" release
 
+prepare_previous_refresh_state() {
+    local runs_json previous_sha previous_source previous_site previous_pages
+    if ! runs_json="$(gh api --method GET \
+          "repos/$release_repository/actions/workflows/pages-site-refresh.yml/runs" \
+          -f branch=main \
+          -f event=workflow_dispatch \
+          -f status=success \
+          -F per_page=100)"; then
+        echo "Previous successful Pages refresh state is unavailable" >&2
+        return 1
+    fi
+    previous_sha="$(jq -r '
+        [
+          .workflow_runs[]
+          | select(
+              .event == "workflow_dispatch"
+              and .status == "completed"
+              and .conclusion == "success"
+              and .head_branch == "main"
+              and .path == ".github/workflows/pages-site-refresh.yml"
+              and (.head_sha | type) == "string"
+              and (.head_sha | test("^[0-9a-f]{40}$"))
+            )
+        ]
+        | if length > 0 then .[0].head_sha else empty end
+      ' <<< "$runs_json")"
+    if [[ ! "$previous_sha" =~ ^[0-9a-f]{40}$ ]] \
+        || ! git merge-base --is-ancestor "$previous_sha" HEAD; then
+        echo "Previous successful Pages refresh is not a trusted main ancestor" >&2
+        return 1
+    fi
+
+    previous_source="$work_dir/previous-source"
+    previous_site="$work_dir/previous-site"
+    previous_pages="$work_dir/previous-pages"
+    mkdir -p "$previous_source" "$previous_site"
+    if ! git archive "$previous_sha" -- site img \
+          | tar -x -C "$previous_source"; then
+        echo "Could not extract the previous Pages refresh source" >&2
+        return 1
+    fi
+    if [[ ! -d "$previous_source/site" \
+          || -L "$previous_source/site" \
+          || ! -d "$previous_source/img" \
+          || -L "$previous_source/img" \
+          || -e "$previous_source/site/site-manifest.sha256" ]]; then
+        echo "Previous Pages refresh source has an invalid layout" >&2
+        return 1
+    fi
+    cp -a "$previous_source/site/." "$previous_site/"
+    cp -a "$previous_source/img" "$previous_site/img"
+    for file_name in \
+        io.github.dxvsi.megawhisper.flatpakref \
+        io.github.dxvsi.megawhisper.flatpakrepo; do
+        install -m 0644 \
+            "$work_dir/baseline-site/$file_name" \
+            "$previous_site/$file_name"
+    done
+    (
+        cd "$previous_site"
+        while IFS= read -r -d '' file_name; do
+            sha256sum -- "$file_name"
+        done < <(
+            find . -type f ! -name site-manifest.sha256 \
+                -printf '%P\0' | LC_ALL=C sort -z
+        )
+    ) > "$previous_site/site-manifest.sha256"
+    "$script_dir/verify-pages-site.sh" \
+        "$previous_site" release manifest
+    "$script_dir/assemble-pages-state.sh" \
+        "$previous_site" "$work_dir/baseline-repo" \
+        "$previous_pages" "$flatpak_commit" release
+}
+
 run_token="refresh-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
 if "$script_dir/verify-live-pages-state.sh" \
       "$base_url" "$work_dir/desired-pages" "$work_dir/desired-site" \
@@ -283,8 +357,14 @@ elif "$script_dir/verify-live-pages-state.sh" \
       "$expected_fingerprint" "$flatpak_commit" \
       "$run_token-baseline" release; then
     refresh_mode=deploy
+elif prepare_previous_refresh_state \
+      && "$script_dir/verify-live-pages-state.sh" \
+          "$base_url" "$work_dir/previous-pages" "$work_dir/previous-site" \
+          "$expected_fingerprint" "$flatpak_commit" \
+          "$run_token-previous" release; then
+    refresh_mode=deploy
 else
-    echo "live Pages state is neither the desired site nor the signed baseline" >&2
+    echo "Live Pages state is not desired, signed baseline, or the exact previous successful refresh" >&2
     exit 65
 fi
 
