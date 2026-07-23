@@ -45,6 +45,32 @@ readonly -a strict_required_files=(
     img/settings-translation.png
 )
 
+readonly -a legacy_qt_widgets_screenshot_paths=(
+    img/main.png
+    img/history.png
+    img/settings-local.png
+    img/settings-cloud.png
+    img/settings-behavior.png
+    img/settings-audio.png
+    img/settings-translation.png
+    img/settings-system.png
+)
+readonly -a legacy_qt_widgets_screenshot_sha256=(
+    a4d0d193e9d0d9b3550849d56778d80845bd4f6a598c98c20d89304a368df8d7
+    09994c1148badf9ffef08b6189ff84d59795ce7a3793db250c6460a884f5bb16
+    27bdc2b4fd415e84f148b63e18239c04f21aba88bc1ab0ce856be18a463659b3
+    dc0eb4ba9d7909029b871806de34bb513cf8828012f4e3d22697537e03b8db8c
+    7dea9007ec6ba443be6326896fb7b5db464afde6bf00cdaf401d46b2011ce699
+    d7e8ddf686a6bcd08b801106102cc94d936e39cda4eaba9982d8c83059d589f7
+    d6538fbf367fad2b2f6e24eea6c614c5d2bd1f3f8aee139f64593b431782d501
+    31494cb44a35f1528d5a8c96496103d21e4f69556215dd2f5f21a096ef1ea8ac
+)
+if [[ "${#legacy_qt_widgets_screenshot_paths[@]}" \
+      -ne "${#legacy_qt_widgets_screenshot_sha256[@]}" ]]; then
+    echo "legacy screenshot path and hash inventories differ" >&2
+    exit 70
+fi
+
 if [[ "$validation_mode" == strict ]]; then
     for file_name in "${strict_required_files[@]}"; do
         if [[ ! -f "$site_dir/$file_name" || -L "$site_dir/$file_name" \
@@ -84,6 +110,40 @@ fi
 if find "$site_dir" -type l -print -quit | grep -q .; then
     echo "site must not contain symbolic links" >&2
     exit 65
+fi
+if [[ "$mode" == release ]]; then
+    readonly -a current_qt_quick_alt_text=(
+        'alt="Current MegaWhisper Qt Quick home page"'
+        'alt="Current MegaWhisper Qt Quick history page with local result variants and export controls"'
+        'alt="Current MegaWhisper Qt Quick Transcription settings with the local model picker"'
+        'alt="Current MegaWhisper Qt Quick Transcription settings for an OpenAI-compatible cloud endpoint"'
+        'alt="Current MegaWhisper Qt Quick Output settings"'
+        'alt="Current MegaWhisper Qt Quick Audio settings and microphone test"'
+        'alt="Current MegaWhisper Qt Quick Output translation settings"'
+        'alt="Current MegaWhisper Qt Quick General settings"'
+    )
+    for expected_alt_text in "${current_qt_quick_alt_text[@]}"; do
+        if ! grep -Fq "$expected_alt_text" "$site_dir/index.html"; then
+            echo "release site is missing the current Qt Quick gallery mapping: $expected_alt_text" >&2
+            exit 65
+        fi
+    done
+    for index in "${!legacy_qt_widgets_screenshot_paths[@]}"; do
+        screenshot_path="${legacy_qt_widgets_screenshot_paths[$index]}"
+        screenshot_file="$site_dir/$screenshot_path"
+        if [[ ! -f "$screenshot_file" || -L "$screenshot_file" \
+              || ! -s "$screenshot_file" ]]; then
+            echo "release site screenshot is missing or invalid: $screenshot_path" >&2
+            exit 66
+        fi
+        screenshot_sha256="$(sha256sum -- "$screenshot_file")"
+        screenshot_sha256="${screenshot_sha256%% *}"
+        if [[ "$screenshot_sha256" \
+              == "${legacy_qt_widgets_screenshot_sha256[$index]}" ]]; then
+            echo "release site contains a legacy Qt Widgets screenshot: $screenshot_path" >&2
+            exit 65
+        fi
+    done
 fi
 if [[ "$validation_mode" == strict ]]; then
     if find "$site_dir" -mindepth 1 -maxdepth 1 \
