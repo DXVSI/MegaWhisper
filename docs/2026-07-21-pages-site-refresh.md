@@ -183,9 +183,10 @@ Implemented on `redesign/product-first-hero`:
 - Added the direct full 1400x900 Qt Quick screenshot, restrained product
   frame, concise bilingual copy, and three exact capability cards.
 - Inspected headless Chrome renders at 1500x853, 1024x768, 768x1024, and
-  390x844; the exact overflow contract also passed at the 320-pixel minimum.
+  390x844; the exact overflow contract also passed at the 320-pixel minimum
+  and on both sides of the 940/941-pixel layout breakpoint.
 - DevTools measurements confirmed exact viewport and scroll widths in English
   and Russian at all four sizes, with the 1400-pixel source image loaded.
 - Strict release-site verification passed with all current screenshots,
-  release links, CSP, local assets, XML, JavaScript, and a 979015-byte payload.
+  release links, CSP, local assets, XML, JavaScript, and a 979199-byte payload.
 - `git diff --check` passed.
