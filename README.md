@@ -2,11 +2,13 @@
 
 Author: [DXVSI](https://github.com/DXVSI)
 
-MegaWhisper is a proprietary Linux desktop application for local and OpenAI-compatible speech transcription. It records through Qt Multimedia, runs local inference through `whisper.cpp`, and keeps output delivery explicit.
+MegaWhisper is a proprietary Linux desktop application for local and OpenAI-compatible speech transcription. It records through Qt Multimedia, runs local inference through verified `whisper.cpp` and `parakeet.cpp` backends, and keeps output delivery explicit.
 
 ## Features
 
-- Local offline transcription with verified GGML models
+- Local offline transcription with a verified, revision-pinned Whisper and Parakeet model catalog
+- Per-model languages, runtime, accelerator capabilities, license, and exact benchmark coverage
+- Model-specific background download progress with explicit pause and resume controls
 - Vulkan acceleration with an automatic CPU fallback
 - OpenAI-compatible file transcription
 - Dictation, long-note, and cloud meeting modes
@@ -31,10 +33,10 @@ flatpak run io.github.dxvsi.megawhisper
 The latest release also provides a portable x86_64 AppImage. Download it from the [latest release](https://github.com/DXVSI/MegaWhisper/releases/latest), then run:
 
 ```fish
-chmod +x ./MegaWhisper-2.1.1-x86_64.AppImage
-./MegaWhisper-2.1.1-x86_64.AppImage --install-desktop-integration
-./MegaWhisper-2.1.1-x86_64.AppImage --check-desktop-integration
-./MegaWhisper-2.1.1-x86_64.AppImage
+chmod +x ./MegaWhisper-2.2.0-x86_64.AppImage
+./MegaWhisper-2.2.0-x86_64.AppImage --install-desktop-integration
+./MegaWhisper-2.2.0-x86_64.AppImage --check-desktop-integration
+./MegaWhisper-2.2.0-x86_64.AppImage
 ```
 
 Portable startup and button-driven operation work without installation. Global Shortcuts and system insertion require the explicit per-user desktop integration shown above. Reinstall it after moving the AppImage because the integration verifies its exact path.
@@ -47,6 +49,11 @@ Local mode does not send audio to a network service. Cloud mode displays an expl
 
 Audio retention is opt-in. Session audio is removed when the application closes. Text-only mode keeps only a bounded temporary retry copy and does not restore it after restart.
 
+Whisper remains the stable default. Parakeet TDT 0.6B v3 Q8_0 is an explicit
+Experimental/Fast option and does not replace the default. Benchmark figures
+are shown only when the exact model artifact, backend, accelerator, corpus, and
+device match a published [MegaWhisper benchmark report](BENCHMARKS.md).
+
 ## Release verification
 
 MegaWhisper 2.1.0 and later use the `binary-v1` release contract. A release contains exactly ten uploaded assets: AppImage, AppImage zsync metadata, Flatpak bundle, two Flatpak repository descriptors, a third-party compliance bundle, a recovery bundle, the public release key, `SHA256SUMS`, and its detached signature.
@@ -57,7 +64,7 @@ The public `main` branch and release tag contain only distribution documentation
 
 ## Third-party software
 
-MegaWhisper includes third-party components under their own licenses, including Qt, GStreamer and `whisper.cpp`. The release asset `MegaWhisper-VERSION-third-party-compliance.tar.zst` contains binary SBOMs, build provenance, notices, license information, and corresponding source required for bundled third-party components. It does not contain the MegaWhisper application source code.
+MegaWhisper includes third-party components under their own licenses, including Qt, GStreamer, `whisper.cpp`, and the optional NVIDIA Parakeet model. The release asset `MegaWhisper-VERSION-third-party-compliance.tar.zst` contains binary SBOMs, build provenance, notices, license information, and corresponding source required for bundled third-party components. It does not contain the MegaWhisper application source code.
 
 See [Third-party notices](THIRD_PARTY_NOTICES.md) for the canonical notice summary.
 
