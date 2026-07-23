@@ -95,3 +95,98 @@ Implemented through [public PR #10](https://github.com/DXVSI/MegaWhisper/pull/10
 Local end-to-end verification against the real published v2.1.1 recovery bundle succeeded. The reconstructed signed baseline matched the previous live Pages state, including the signed Flatpak static delta and commit `ed00fa4052fdb2860dc7783c56a1f48add4d0615719e33a0d2f6bec778fa7d07`.
 
 [Pages refresh run 29816200635](https://github.com/DXVSI/MegaWhisper/actions/runs/29816200635) completed successfully in 57 seconds without application build jobs or rollback. Independent live verification confirmed HTTP 200 for the page and 512x512 PNG, exact deployed icon bytes and social metadata, version 2.1.1, and the unchanged Flatpak commit.
+
+## Product-first hero redesign, 2026-07-24
+
+### Goal
+
+Replace the first-screen composition with a clearer presentation of the real
+application. The visitor should understand the product, supported execution
+paths, and primary installation action without decoding decorative overlays.
+
+### Confirmed current state
+
+- The hero wraps `img/main.png`, which already contains native window chrome,
+  in a second artificial title bar.
+- The product image is darkened with `brightness(0.82)`, desaturated, enlarged,
+  cropped, rotated, and partly covered by a decorative waveform panel.
+- Two floating notes overlap the product frame and consume vertical space
+  without explaining the model/runtime choices introduced for 2.2.0.
+- At a 1500x850 viewport the real interface occupies a small, low-contrast
+  fraction of the first screen.
+- The page already contains verified Qt Quick screenshots. No new external
+  visual dependency or generated mockup is required.
+
+### Alternatives
+
+1. Keep the current composition and only increase image brightness. This does
+   not remove the duplicated window frame, visual noise, or weak hierarchy.
+2. Add an interactive screenshot carousel. This increases JavaScript,
+   accessibility, and input-state surface before the visitor understands the
+   primary product.
+3. Use a large direct product frame with concise capability facts. This keeps
+   the page truthful, static, fast, and visually focused.
+
+Option 3 is selected.
+
+### Selected design
+
+- Keep the existing industrial dark palette and bilingual contract.
+- Replace the nested mock window, waveform, stage index, and floating notes
+  with one large, unfiltered screenshot in a restrained product frame.
+- Tighten the headline and lead around Linux dictation and user-controlled
+  processing.
+- Keep Flatpak and latest-release actions above the fold.
+- Replace numbered generic facts with three explicit capability cards:
+  local Whisper and Parakeet, CPU with Vulkan acceleration, and
+  OpenAI-compatible cloud transcription.
+- Preserve the existing screenshot file, release links, privacy wording,
+  Content Security Policy, no-tracking policy, and no-external-runtime rule.
+- Collapse to a single-column composition before the product frame becomes too
+  narrow, and keep all actions usable at 320 CSS pixels.
+
+### Acceptance and verification
+
+- The real application screenshot is not filtered, rotated, cropped, or
+  covered.
+- The hero contains no duplicate window title bar.
+- English and Russian strings remain complete.
+- Keyboard focus, reduced motion, forced colors, and mobile navigation remain
+  valid.
+- The page renders without horizontal overflow at 1500x850, 1024x768,
+  768x1024, and 390x844 viewports.
+- `verify-pages-site.sh` passes in strict release mode on a fully staged site.
+- HTML, JavaScript, XML, local asset inventory, site size, and release links
+  pass the existing fail-closed checks.
+
+### Risks and rollback
+
+The change is limited to tracked HTML/CSS and this document. Rollback is the
+previous public `main` commit or the existing signed Pages recovery path. No
+application package, release tag, Flatpak repository, signing key, permission,
+or release asset changes.
+
+### Out of scope
+
+- Changing the application screenshots.
+- Adding animation, a carousel, analytics, external fonts, or remote scripts.
+- Changing package installation or release publication logic.
+- Redesigning lower page sections in the same change.
+
+### Implementation status
+
+Approved by the user for immediate implementation after documentation.
+Implemented on `redesign/product-first-hero`:
+
+- Removed the duplicate title bar, rotated mock window, screenshot filter,
+  crop, waveform footer, stage index, and overlapping notes.
+- Added the direct full 1400x900 Qt Quick screenshot, restrained product
+  frame, concise bilingual copy, and three exact capability cards.
+- Inspected headless Chrome renders at 1500x853, 1024x768, 768x1024, and
+  390x844; the exact overflow contract also passed at the 320-pixel minimum
+  and on both sides of the 940/941-pixel layout breakpoint.
+- DevTools measurements confirmed exact viewport and scroll widths in English
+  and Russian at all four sizes, with the 1400-pixel source image loaded.
+- Strict release-site verification passed with all current screenshots,
+  release links, CSP, local assets, XML, JavaScript, and a 979199-byte payload.
+- `git diff --check` passed.
