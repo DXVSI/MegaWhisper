@@ -37,6 +37,9 @@ readonly -a third_party_compliance_input_names=(
     "qtmultimedia-everywhere-src-6.11.1.tar.xz"
     "qtmultimedia-pipewire-hook-race.patch"
     "qtmultimedia-qtbug-147011.patch"
+    "whisper-backend-provenance.patch"
+    "whisper-parakeet-backend-provenance.patch"
+    "whisper-vulkan-future-cleanup.patch"
 )
 
 readonly -a recovery_payload_names=(
