@@ -220,8 +220,11 @@ rollback_site_dir="$state_root/rollback-site"
 ostree fsck --repo="$rollback_repo_dir"
 "$script_dir/extract-recovery-archive.sh" \
     "$recovery_dir/$rollback_site_archive_name" "$rollback_site_dir"
+# The rollback site is an immutable historical baseline. Its signed manifest is
+# authoritative even when the current candidate adds new required presentation
+# assets that did not exist in the previous release.
 "$script_dir/verify-pages-site.sh" \
-    "$rollback_site_dir" rollback "$site_validation_mode"
+    "$rollback_site_dir" rollback manifest
 if resolved_rollback_commit="$(
     ostree rev-parse --repo="$rollback_repo_dir" "$app_ref" 2>/dev/null
 )"; then
