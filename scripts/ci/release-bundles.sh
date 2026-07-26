@@ -85,7 +85,7 @@ validate_metadata() {
     local metadata_file expected_format
     if [[ "$bundle_kind" == third-party-compliance ]]; then
         metadata_file="$root_dir/COMPLIANCE.txt"
-        expected_format=2
+        expected_format=4
     else
         metadata_file="$root_dir/flatpak-pages-recovery.txt"
         expected_format=5
@@ -107,7 +107,7 @@ validate_metadata() {
     fi
     if [[ "$bundle_kind" == third-party-compliance ]]; then
         declare -A expected_metadata=(
-            [format]=2
+            [format]=4
             [asset_schema]=binary-v1
             [version]="$version"
             [appimage_binary]="MegaWhisper-$version-x86_64.AppImage"
@@ -121,6 +121,9 @@ validate_metadata() {
             [qtmultimedia_source]="qtmultimedia-everywhere-src-6.11.1.tar.xz"
             [qtmultimedia_shutdown_patch]="qtmultimedia-qtbug-147011.patch"
             [qtmultimedia_hook_race_patch]="qtmultimedia-pipewire-hook-race.patch"
+            [whisper_parakeet_provenance_patch]="whisper-parakeet-backend-provenance.patch"
+            [whisper_backend_provenance_patch]="whisper-backend-provenance.patch"
+            [whisper_vulkan_ci_patch]="whisper-vulkan-future-cleanup.patch"
         )
         if [[ "${#metadata[@]}" -ne "${#expected_metadata[@]}" ]]; then
             echo "compliance metadata field inventory is not exact" >&2
