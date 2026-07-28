@@ -939,10 +939,26 @@ jobs:
           FINGERPRINT: ${{ steps.state.outputs.fingerprint }}
         run: |
           set -Eeuo pipefail
-          scripts/ci/verify-live-pages-state.sh \
-            "$FLATPAK_REPO_URL" rollback-pages rollback-site "$FINGERPRINT" \
-            "$EXPECTED_ROLLBACK_COMMIT" \
-            "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-rollback" rollback
+          rollback_verified=0
+          deadline=$((SECONDS + 180))
+          for attempt in $(seq 1 12); do
+            echo "Checking automatic rollback, attempt $attempt of 12"
+            if scripts/ci/verify-live-pages-state.sh \
+                "$FLATPAK_REPO_URL" rollback-pages rollback-site "$FINGERPRINT" \
+                "$EXPECTED_ROLLBACK_COMMIT" \
+                "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-rollback-$attempt" rollback; then
+              rollback_verified=1
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$rollback_verified" -ne 1 ]]; then
+            echo "Automatic rollback did not restore the signed Pages state" >&2
+            exit 65
+          fi
 
   recover:
     if: >-
