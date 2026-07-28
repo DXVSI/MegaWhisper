@@ -999,16 +999,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPERATION: ${{ github.event.client_payload.operation }}
-          RELEASE_TAG: ${{ github.event.client_payload.tag }}
-          RELEASE_VERSION: ${{ github.event.client_payload.version }}
-          ASSET_SCHEMA: ${{ github.event.client_payload.asset_schema }}
-          RELEASE_ID: ${{ github.event.client_payload.release_id }}
-          ASSET_INVENTORY: ${{ toJSON(github.event.client_payload.assets) }}
-          DISPATCH_RUN_ID: ${{ github.event.client_payload.dispatch_run_id }}
-          DISPATCH_RUN_ATTEMPT: ${{ github.event.client_payload.dispatch_run_attempt }}
-          DISPATCH_ID: ${{ github.event.client_payload.dispatch_id }}
-          PRODUCER_RUN_ID: ${{ github.event.client_payload.producer_run_id }}
-          EXPECTED_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+          RELEASE_TAG: >-
+            ${{ github.event.client_payload.release_payload.tag
+                || github.event.client_payload.tag }}
+          RELEASE_VERSION: >-
+            ${{ github.event.client_payload.release_payload.version
+                || github.event.client_payload.version }}
+          ASSET_SCHEMA: >-
+            ${{ github.event.client_payload.release_payload.asset_schema
+                || github.event.client_payload.asset_schema }}
+          RELEASE_ID: >-
+            ${{ github.event.client_payload.release_payload.release_id
+                || github.event.client_payload.release_id }}
+          ASSET_INVENTORY: >-
+            ${{ toJSON(github.event.client_payload.release_payload.assets
+                || github.event.client_payload.assets) }}
+          DISPATCH_RUN_ID: >-
+            ${{ github.event.client_payload.release_payload.dispatch_run_id
+                || github.event.client_payload.dispatch_run_id }}
+          DISPATCH_RUN_ATTEMPT: >-
+            ${{ github.event.client_payload.release_payload.dispatch_run_attempt
+                || github.event.client_payload.dispatch_run_attempt }}
+          DISPATCH_ID: >-
+            ${{ github.event.client_payload.release_payload.dispatch_id
+                || github.event.client_payload.dispatch_id }}
+          PRODUCER_RUN_ID: >-
+            ${{ github.event.client_payload.release_payload.producer_run_id
+                || github.event.client_payload.producer_run_id }}
+          EXPECTED_COMMIT: >-
+            ${{ github.event.client_payload.release_payload.flatpak_commit
+                || github.event.client_payload.flatpak_commit }}
         run: |
           set -Eeuo pipefail
           # shellcheck disable=SC2153
@@ -1366,7 +1386,9 @@ jobs:
       - name: Verify live recovered site and repository
         shell: bash
         env:
-          EXPECTED_COMMIT: ${{ github.event.client_payload.flatpak_commit }}
+          EXPECTED_COMMIT: >-
+            ${{ github.event.client_payload.release_payload.flatpak_commit
+                || github.event.client_payload.flatpak_commit }}
           FINGERPRINT: ${{ steps.recovery-state.outputs.fingerprint }}
           RECOVERY_MODE: ${{ steps.recovery-state.outputs.mode }}
         run: |
