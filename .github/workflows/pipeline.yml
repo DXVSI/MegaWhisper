@@ -588,7 +588,7 @@ jobs:
           identity_output="$(timeout 60s flatpak run --user \
             --env=QT_QPA_PLATFORM=offscreen \
             io.github.dxvsi.megawhisper --identity-smoke-test)"
-          expected_identity='identity-smoke: app_id=io.github.dxvsi.megawhisper; package_kind=flatpak; desktop_id=io.github.dxvsi.megawhisper'
+          expected_identity='identity-smoke: app_id=io.github.dxvsi.megawhisper; package_kind=flatpak; build_profile=standard; desktop_id=io.github.dxvsi.megawhisper'
           if [[ "$identity_output" != "$expected_identity" ]]; then
             echo "Flatpak ref installed an unexpected application identity" >&2
             exit 65
