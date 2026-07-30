@@ -12,7 +12,7 @@ if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
     echo "release asset version must be a stable semantic version" >&2
     exit 64
 fi
-IFS=. read -r version_major version_minor _ <<< "$version"
+IFS=. read -r version_major version_minor version_patch <<< "$version"
 if (( 10#$version_major < 2 \
       || (10#$version_major == 2 && 10#$version_minor < 1) )); then
     echo "binary-v1 release assets require version 2.1.0 or newer" >&2
@@ -27,7 +27,7 @@ case "$mode" in
         ;;
 esac
 
-readonly -a third_party_compliance_input_names=(
+third_party_compliance_input_names=(
     "MegaWhisper-$version-build-provenance.json"
     "MegaWhisper-AppImage-$version.spdx.json"
     "MegaWhisper-AppImage-openSUSE-corresponding-source.tar.zst"
@@ -37,10 +37,22 @@ readonly -a third_party_compliance_input_names=(
     "qtmultimedia-everywhere-src-6.11.1.tar.xz"
     "qtmultimedia-pipewire-hook-race.patch"
     "qtmultimedia-qtbug-147011.patch"
-    "whisper-backend-provenance.patch"
-    "whisper-parakeet-backend-provenance.patch"
-    "whisper-vulkan-future-cleanup.patch"
 )
+# The signed binary-v1 compliance contract gained the three whisper.cpp
+# provenance patches in v2.2.1. Historical releases remain immutable, so
+# recovery must verify their earlier exact inventory instead of retroactively
+# requiring files that were not part of that contract.
+if (( 10#$version_major > 2 \
+      || (10#$version_major == 2 && 10#$version_minor > 2) \
+      || (10#$version_major == 2 && 10#$version_minor == 2 \
+          && 10#$version_patch >= 1) )); then
+    third_party_compliance_input_names+=(
+        "whisper-backend-provenance.patch"
+        "whisper-parakeet-backend-provenance.patch"
+        "whisper-vulkan-future-cleanup.patch"
+    )
+fi
+readonly -a third_party_compliance_input_names
 
 readonly -a recovery_payload_names=(
     "MegaWhisper-flatpak-repo.tar.zst"
